@@ -23,6 +23,20 @@ final class LocalizationTests: XCTestCase {
         XCTAssertEqual(AppLanguage.english.localized(.newNote), "New note")
     }
 
+    func testTitleErrorStringsMatchProductSpecification() {
+        XCTAssertEqual(AppLanguage.chinese.localized(.titleTooLong), "标题最多 50 个字符，请缩短后重试。")
+        XCTAssertEqual(AppLanguage.english.localized(.titleTooLong), "Titles can contain up to 50 characters. Shorten the title and try again.")
+        XCTAssertEqual(AppLanguage.chinese.localized(.titleSaveFailed), "标题未保存，请重试或按 Esc 取消。")
+        XCTAssertEqual(AppLanguage.english.localized(.titleSaveFailed), "Title wasn't saved. Try again or press Esc to cancel.")
+        XCTAssertEqual(AppLanguage.chinese.localized(.titleTargetMissing), "该分页已不存在，未保存标题。")
+        XCTAssertEqual(AppLanguage.english.localized(.titleTargetMissing), "This note no longer exists. The title wasn't saved.")
+        for language in [AppLanguage.chinese, .english] {
+            XCTAssertEqual(NoteTitleError.tooLong.localized(for: language), language.localized(.titleTooLong))
+            XCTAssertEqual(NoteTitleError.saveFailed.localized(for: language), language.localized(.titleSaveFailed))
+            XCTAssertEqual(NoteTitleError.targetMissing.localized(for: language), language.localized(.titleTargetMissing))
+        }
+    }
+
     func testNoteTitleStrings() {
         XCTAssertEqual(AppLanguage.chinese.localized(.untitled), "无标题")
         XCTAssertEqual(AppLanguage.english.localized(.untitled), "Untitled")

@@ -1,4 +1,5 @@
 import AppKit
+import MarkdownEngine
 import SwiftUI
 
 enum MarkdownCommand: CaseIterable, Identifiable {
@@ -44,7 +45,15 @@ enum MarkdownCommand: CaseIterable, Identifiable {
 @MainActor
 final class EditorInteractionState: ObservableObject {
     @Published private(set) var isDraggingSelection = false
-    var onSelectionChange: ((NSRange) -> Void)?
+    var onDocumentSelectionChange: ((UUID, NSRange) -> Void)?
+    var isFocusSuspended = false {
+        didSet {
+            if isFocusSuspended { cancelPendingFocus() }
+        }
+    }
+    private(set) var documentID: UUID?
+    private var bindingGeneration = 0
+    private var focusGeneration = 0
 
     private weak var textView: NSTextView?
     private weak var observedSelectionTextView: NSTextView?
@@ -56,19 +65,46 @@ final class EditorInteractionState: ObservableObject {
     private var layoutRefreshGeneration = 0
     private var selectionRestoreGeneration = 0
 
-    func bind(containerView: NSView?, textView: NSTextView?) {
-        if let textView {
+    func prepareForDocument(_ id: UUID) {
+        guard documentID != id else { return }
+        documentID = id
+        bindingGeneration += 1
+        selectionRestoreGeneration += 1
+        pendingSelectionRange = nil
+        textView = nil
+        observedSelectionTextView = nil
+        if let selectionObserver {
+            NotificationCenter.default.removeObserver(selectionObserver)
+            self.selectionObserver = nil
+        }
+    }
+
+    func cancelPendingFocus() {
+        focusGeneration += 1
+        pendingFocus = false
+        focusAttemptsRemaining = 0
+    }
+
+    static func isBodyTextView(_ view: NSTextView) -> Bool {
+        !view.isFieldEditor && view.delegate is NativeTextViewCoordinator
+    }
+
+    func bind(containerView: NSView?, textView: NSTextView?, documentID: UUID? = nil) {
+        if let documentID { prepareForDocument(documentID) }
+        if let textView, Self.isBodyTextView(textView) {
             self.textView = textView
             observeSelectionChanges(in: textView)
             applyPendingSelectionRestore()
         }
 
-        if pendingFocus {
+        if pendingFocus, !isFocusSuspended {
             focusEditor()
         }
     }
 
     func requestFocus(searchingIn rootView: NSView?) {
+        guard !isFocusSuspended else { return }
+        cancelPendingFocus()
         refreshTextView(searchingIn: rootView)
         pendingFocus = true
         focusAttemptsRemaining = 8
@@ -111,8 +147,9 @@ final class EditorInteractionState: ObservableObject {
         scheduleLayoutRefresh(generation: generation, remainingPasses: 4, searchingIn: rootView, resetScroll: resetScroll)
     }
 
-    func currentSelectionRange() -> NSRange? {
-        guard let textView else { return nil }
+    func currentSelectionRange(for id: UUID? = nil) -> NSRange? {
+        guard !isFocusSuspended, id == nil || id == documentID,
+              let textView, Self.isBodyTextView(textView) else { return nil }
         return safeSelectedRange(in: textView)
     }
 
@@ -122,7 +159,7 @@ final class EditorInteractionState: ObservableObject {
     }
 
     func applyMarkdownCommand(_ command: MarkdownCommand, language: AppLanguage) {
-        guard let textView else { return }
+        guard !isFocusSuspended, let textView, Self.isBodyTextView(textView) else { return }
 
         focusEditor()
 
@@ -151,6 +188,7 @@ final class EditorInteractionState: ObservableObject {
     }
 
     func handleMouseEvent(_ event: NSEvent, searchingIn rootView: NSView?) {
+        guard !isFocusSuspended else { return }
         switch event.type {
         case .leftMouseDown:
             refreshTextView(searchingIn: rootView)
@@ -182,7 +220,7 @@ final class EditorInteractionState: ObservableObject {
     }
 
     private func focusEditor() {
-        guard let textView else {
+        guard !isFocusSuspended, let textView, Self.isBodyTextView(textView) else {
             return
         }
 
@@ -201,14 +239,23 @@ final class EditorInteractionState: ObservableObject {
         }
 
         observedSelectionTextView = textView
+        bindingGeneration += 1
+        let generation = bindingGeneration
+        let originID = documentID
         selectionObserver = NotificationCenter.default.addObserver(
             forName: NSTextView.didChangeSelectionNotification,
             object: textView,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, let range = self.currentSelectionRange() else { return }
-                self.onSelectionChange?(range)
+        ) { [weak self, weak textView] _ in
+            // 通知同步捕获原文档与选区；异步回调不得重读已切换的正文。
+            MainActor.assumeIsolated {
+                guard let self, !self.isFocusSuspended, let textView, let originID else { return }
+                let range = self.safeSelectedRange(in: textView)
+                Task { @MainActor [weak self] in
+                    guard let self, !self.isFocusSuspended,
+                          self.bindingGeneration == generation else { return }
+                    self.onDocumentSelectionChange?(originID, range)
+                }
             }
         }
     }
@@ -391,8 +438,10 @@ final class EditorInteractionState: ObservableObject {
     }
 
     private func retryFocus(searchingIn rootView: NSView?) {
+        let generation = focusGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak rootView] in
-            guard let self, self.pendingFocus else { return }
+            guard let self, !self.isFocusSuspended, self.pendingFocus,
+                  self.focusGeneration == generation else { return }
             self.refreshTextView(searchingIn: rootView)
 
             if self.textView != nil {
@@ -412,11 +461,12 @@ final class EditorInteractionState: ObservableObject {
 
     private func refreshTextView(searchingIn rootView: NSView?) {
         guard let rootView,
-              let freshTextView = rootView.firstDescendant(ofType: NSTextView.self) else {
+              let freshTextView = rootView.firstBodyTextView() else {
             return
         }
 
         textView = freshTextView
+        observeSelectionChanges(in: freshTextView)
     }
 
     private func resetDragState() {
@@ -439,52 +489,49 @@ final class EditorInteractionState: ObservableObject {
 
 struct EditorFocusBinder: NSViewRepresentable {
     let state: EditorInteractionState
+    let documentID: UUID
+
+    final class Coordinator {
+        var generation = 0
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
-        bind(from: view)
+        bind(from: view, coordinator: context.coordinator)
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
-        bind(from: view)
+        bind(from: view, coordinator: context.coordinator)
     }
 
-    private func bind(from view: NSView) {
-        DispatchQueue.main.async {
-            let container = view.superview
-            let textView = container?.firstDescendant(ofType: NSTextView.self)
-                ?? view.firstAncestorDescendant(ofType: NSTextView.self)
-            state.bind(containerView: container, textView: textView)
+    private func bind(from view: NSView, coordinator: Coordinator) {
+        state.prepareForDocument(documentID)
+        coordinator.generation += 1
+        let generation = coordinator.generation
+        DispatchQueue.main.async { [weak view, weak coordinator] in
+            guard let view, coordinator?.generation == generation,
+                  state.documentID == documentID else { return }
+            var container = view.superview
+            while let current = container {
+                if let textView = current.firstBodyTextView() {
+                    state.bind(containerView: current, textView: textView, documentID: documentID)
+                    return
+                }
+                container = current.superview
+            }
         }
     }
 }
 
 private extension NSView {
-    func firstDescendant<T: NSView>(ofType type: T.Type) -> T? {
-        if let match = self as? T {
-            return match
-        }
-
+    func firstBodyTextView() -> NSTextView? {
+        if let view = self as? NSTextView, EditorInteractionState.isBodyTextView(view) { return view }
         for subview in subviews {
-            if let match = subview.firstDescendant(ofType: type) {
-                return match
-            }
+            if let match = subview.firstBodyTextView() { return match }
         }
-
-        return nil
-    }
-
-    func firstAncestorDescendant<T: NSView>(ofType type: T.Type) -> T? {
-        var current: NSView? = self
-
-        while let view = current {
-            if let match = view.firstDescendant(ofType: type) {
-                return match
-            }
-            current = view.superview
-        }
-
         return nil
     }
 }

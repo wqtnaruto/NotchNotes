@@ -7,11 +7,13 @@ struct NoteTab: Identifiable, Codable, Equatable {
     var createdAt: Date
     var selectionLocation: Int?
     var selectionLength: Int?
+    var customTitle: String?
 
-    init(id: UUID = UUID(), text: String = "", createdAt: Date = Date()) {
+    init(id: UUID = UUID(), text: String = "", createdAt: Date = Date(), customTitle: String? = nil) {
         self.id = id
         self.text = text
         self.createdAt = createdAt
+        self.customTitle = customTitle
         selectionLocation = 0
         selectionLength = 0
     }
@@ -42,16 +44,19 @@ final class NoteStore: ObservableObject {
 
     private let defaults: UserDefaults
     private let archiveURL: URL?
+    private let archiveWriter: @Sendable (Data, URL) throws -> Void
     private let persistenceQueue = DispatchQueue(label: "io.github.oiloil.NotchNotes.persistence")
     private var pendingSave: DispatchWorkItem?
     private var recentlyDeletedNote: DeletedNote?
 
     init(
         defaults: UserDefaults = .standard,
-        archiveURL: URL? = NoteStore.defaultArchiveURL()
+        archiveURL: URL? = NoteStore.defaultArchiveURL(),
+        archiveWriter: @escaping @Sendable (Data, URL) throws -> Void = NoteStore.writeArchive
     ) {
         self.defaults = defaults
         self.archiveURL = archiveURL
+        self.archiveWriter = archiveWriter
 
         let snapshot = Self.loadLatestSnapshot(defaults: defaults, archiveURL: archiveURL)
         let storedTabs = snapshot?.tabs ?? []
@@ -162,6 +167,7 @@ final class NoteStore: ObservableObject {
             return language.localized(.untitled)
         }
 
+        if let customTitle = tabs[index].customTitle { return customTitle }
         var title = firstMeaningfulLine(in: tabs[index].text) ?? ""
 
         while let prefix = ["# ", "## ", "### ", "- [ ] ", "- [x] ", "- [X] ", "- ", "* ", "> "]
@@ -172,6 +178,36 @@ final class NoteStore: ObservableObject {
         title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return language.localized(.untitledNumbered(index: index + 1)) }
         return title.count > 42 ? String(title.prefix(41)) + "…" : title
+    }
+
+    func commitTitle(for id: UUID, change: NoteTitleChange) throws {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else {
+            throw NoteTitleError.targetMissing
+        }
+        guard case let .set(title) = change, title != tabs[index].customTitle else { return }
+        var candidate = tabs
+        candidate[index].customTitle = title
+        let savedAt = Date()
+        let needsBodySave = pendingSave != nil
+        pendingSave?.cancel()
+        pendingSave = nil
+        do {
+            guard let archiveURL else { throw NoteTitleError.saveFailed }
+            let snapshot = PersistedNotes(tabs: candidate, activeTabID: activeTabID, savedAt: savedAt)
+            let data = try JSONEncoder().encode(snapshot)
+            // 旧快照先完成，候选落盘后才发布。writer 不得同步回主线程。
+            try persistenceQueue.sync { try archiveWriter(data, archiveURL) }
+            persistRecoveryCopy(data, savedAt: savedAt)
+            tabs = candidate
+        } catch {
+            if needsBodySave { scheduleSave() }
+            throw NoteTitleError.saveFailed
+        }
+    }
+
+    nonisolated static func writeArchive(_ data: Data, _ url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
     }
 
     var canRestoreDeletedNote: Bool {
@@ -221,23 +257,24 @@ final class NoteStore: ObservableObject {
         let snapshot = PersistedNotes(tabs: tabs, activeTabID: activeTabID, savedAt: savedAt)
 
         guard let archiveData = try? JSONEncoder().encode(snapshot) else { return }
-        defaults.set(archiveData, forKey: Self.archiveDefaultsKey)
-        defaults.set(activeTabID.uuidString, forKey: Self.activeTabIDKey)
-        defaults.set(text, forKey: Self.legacyTextKey)
-        defaults.set(savedAt, forKey: Self.lastSavedAtKey)
+        persistRecoveryCopy(archiveData, savedAt: savedAt)
 
         guard let archiveURL else { return }
+        let writer = archiveWriter
         persistenceQueue.async {
             do {
-                try FileManager.default.createDirectory(
-                    at: archiveURL.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try archiveData.write(to: archiveURL, options: .atomic)
+                try writer(archiveData, archiveURL)
             } catch {
                 // UserDefaults remains the compatible recovery copy.
             }
         }
+    }
+
+    private func persistRecoveryCopy(_ data: Data, savedAt: Date) {
+        defaults.set(data, forKey: Self.archiveDefaultsKey)
+        defaults.set(activeTabID.uuidString, forKey: Self.activeTabIDKey)
+        defaults.set(text, forKey: Self.legacyTextKey)
+        defaults.set(savedAt, forKey: Self.lastSavedAtKey)
     }
 
     private static func loadLatestSnapshot(

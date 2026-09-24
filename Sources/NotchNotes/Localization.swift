@@ -28,6 +28,9 @@ enum LocalizedStringKey {
     // Note titles
     case untitled
     case untitledNumbered(index: Int)
+    case titleTooLong
+    case titleSaveFailed
+    case titleTargetMissing
 
     // File shelf
     case removeAllShelfItems
@@ -92,6 +95,16 @@ enum LocalizedStringKey {
     case linkTextPlaceholder
 }
 
+extension NoteTitleError {
+    func localized(for language: AppLanguage) -> String {
+        switch self {
+        case .tooLong: return language.localized(.titleTooLong)
+        case .saveFailed: return language.localized(.titleSaveFailed)
+        case .targetMissing: return language.localized(.titleTargetMissing)
+        }
+    }
+}
+
 extension AppLanguage {
     func localized(_ key: LocalizedStringKey) -> String {
         switch key {
@@ -144,6 +157,18 @@ extension AppLanguage {
             return self == .chinese ? "删除此笔记" : "Delete This Note"
 
         // Note titles
+        case .titleTooLong:
+            return self == .chinese
+                ? "标题最多 50 个字符，请缩短后重试。"
+                : "Titles can contain up to 50 characters. Shorten the title and try again."
+        case .titleSaveFailed:
+            return self == .chinese
+                ? "标题未保存，请重试或按 Esc 取消。"
+                : "Title wasn't saved. Try again or press Esc to cancel."
+        case .titleTargetMissing:
+            return self == .chinese
+                ? "该分页已不存在，未保存标题。"
+                : "This note no longer exists. The title wasn't saved."
         case .untitled:
             return self == .chinese ? "无标题" : "Untitled"
         case let .untitledNumbered(index):

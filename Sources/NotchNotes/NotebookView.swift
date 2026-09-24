@@ -16,6 +16,7 @@ struct NotebookView: View {
     @ObservedObject var workspaceState: NotebookWorkspaceState
     @ObservedObject var drawerState: DrawerState
     @ObservedObject var editorInteractionState: EditorInteractionState
+    @ObservedObject var titleEditingState: TitleEditingState
     let layout: NotchLayout
 
     var body: some View {
@@ -66,7 +67,8 @@ struct NotebookView: View {
                     store: store,
                     editorInteractionState: editorInteractionState,
                     availableWidth: tabControlWidth,
-                    settingsStore: settingsStore
+                    settingsStore: settingsStore,
+                    titleEditingState: titleEditingState
                 )
                 .frame(
                     width: tabControlWidth,
@@ -74,6 +76,7 @@ struct NotebookView: View {
                     alignment: .topLeading
                 )
                 .frame(height: toolbarHeight, alignment: .top)
+                .zIndex(1)
 
                 VStack(spacing: shelfSpacing) {
                     MarkdownEditorPanel(
@@ -108,13 +111,14 @@ struct NotebookView: View {
         .padding(.horizontal, contentHorizontalPadding)
         .padding(.bottom, contentBottomPadding)
         .onAppear {
-            editorInteractionState.onSelectionChange = { [weak store] range in
-                guard let store else { return }
-                store.updateSelection(for: store.activeTabID, range: range)
+            editorInteractionState.onDocumentSelectionChange = { [weak store = store] id, range in
+                store?.updateSelection(for: id, range: range)
             }
+            editorInteractionState.prepareForDocument(store.activeTabID)
             editorInteractionState.restoreSelection(store.selectionRange(for: store.activeTabID))
         }
         .onChange(of: store.activeTabID) { _, newTabID in
+            editorInteractionState.prepareForDocument(newTabID)
             editorInteractionState.restoreSelection(
                 store.selectionRange(for: newTabID),
                 reveal: false
@@ -182,38 +186,11 @@ struct NotebookView: View {
     }
 
     private var tabControlHeight: CGFloat {
-        let rowHeight: CGFloat = 24
-        let rowSpacing: CGFloat = 4
-        let verticalPadding: CGFloat = 4
-        return CGFloat(tabRowCount) * rowHeight
-            + CGFloat(max(tabRowCount - 1, 0)) * rowSpacing
-            + verticalPadding
+        TabPagerMetrics.height
     }
 
     private var toolbarHeight: CGFloat {
-        max(tabControlHeight, 28)
-    }
-
-    private var tabRowCount: Int {
-        let availableWidth = max(tabControlWidth - 34, 160)
-        var rows = 1
-        var currentRowWidth: CGFloat = 0
-
-        for _ in store.tabs {
-            let itemWidth: CGFloat = 26
-
-            let proposedWidth = currentRowWidth == 0
-                ? itemWidth
-                : currentRowWidth + 6 + itemWidth
-            if currentRowWidth > 0, proposedWidth > availableWidth {
-                rows += 1
-                currentRowWidth = itemWidth
-            } else {
-                currentRowWidth = proposedWidth
-            }
-        }
-
-        return rows
+        TabPagerMetrics.height
     }
 
     private var editorSpacing: CGFloat {
@@ -560,155 +537,6 @@ struct MarkdownCommandLabel: View {
     }
 }
 
-struct TabPagerControl: View {
-    @ObservedObject var store: NoteStore
-    let editorInteractionState: EditorInteractionState
-    let availableWidth: CGFloat
-    let settingsStore: AppSettingsStore
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            WrappingHStack(
-                availableWidth: max(availableWidth - 34, 160),
-                horizontalSpacing: 6,
-                verticalSpacing: 4
-            ) {
-                ForEach(store.tabs) { tab in
-                    let isSelected = tab.id == store.activeTabID
-                    Button {
-                        rememberCurrentSelection()
-                        withAnimation(tabSwitchAnimation) {
-                            store.selectTab(tab.id)
-                        }
-                    } label: {
-                        ZStack {
-                            if isSelected {
-                                Circle()
-                                    .fill(Color.white.opacity(0.14))
-                                    .frame(width: 14, height: 14)
-                            }
-
-                            Circle()
-                                .fill(isSelected ? Color.white.opacity(0.92) : Color.white.opacity(0.34))
-                                .frame(width: isSelected ? 7 : 6, height: isSelected ? 7 : 6)
-                                .shadow(color: .white.opacity(isSelected ? 0.42 : 0), radius: 3)
-                        }
-                        .frame(width: 26, height: 24)
-                        .contentShape(Rectangle())
-                        .animation(tabSwitchAnimation, value: isSelected)
-                    }
-                    .buttonStyle(TabDotButtonStyle(isSelected: isSelected))
-                    .help(store.title(for: tab.id, language: settingsStore.language))
-                    .accessibilityLabel(
-                        isSelected
-                            ? settingsStore.language.localized(.currentNote(name: store.title(for: tab.id, language: settingsStore.language)))
-                            : settingsStore.language.localized(.openNote(name: store.title(for: tab.id, language: settingsStore.language)))
-                    )
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            rememberCurrentSelection()
-                            withAnimation(tabSwitchAnimation) {
-                                store.removeTab(tab.id)
-                            }
-                        } label: {
-                            Label(settingsStore.language.localized(.deleteThisNote), systemImage: "trash")
-                        }
-                        .disabled(store.tabs.count <= 1)
-                    }
-                }
-            }
-
-            Button {
-                rememberCurrentSelection()
-                withAnimation(tabSwitchAnimation) {
-                    store.addTab()
-                }
-            } label: {
-                Image(systemName: "plus")
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(TabIconButtonStyle())
-            .fixedSize()
-            .help(settingsStore.language.localized(.newNote))
-            .accessibilityLabel(settingsStore.language.localized(.newNote))
-        }
-        .padding(.horizontal, 2)
-        .padding(.vertical, 2)
-        .contentShape(Rectangle())
-    }
-
-    private var tabSwitchAnimation: Animation {
-        .spring(response: 0.26, dampingFraction: 0.82)
-    }
-
-    private func rememberCurrentSelection() {
-        guard let range = editorInteractionState.currentSelectionRange() else { return }
-        store.updateSelection(for: store.activeTabID, range: range)
-    }
-}
-
-private struct WrappingHStack: Layout {
-    let availableWidth: CGFloat
-    let horizontalSpacing: CGFloat
-    let verticalSpacing: CGFloat
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) -> CGSize {
-        let result = layoutSubviews(in: availableWidth, subviews: subviews)
-        return CGSize(width: availableWidth, height: result.size.height)
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) {
-        let result = layoutSubviews(in: min(bounds.width, availableWidth), subviews: subviews)
-        for (index, origin) in result.origins.enumerated() {
-            subviews[index].place(
-                at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
-                anchor: .topLeading,
-                proposal: .unspecified
-            )
-        }
-    }
-
-    private func layoutSubviews(
-        in availableWidth: CGFloat,
-        subviews: Subviews
-    ) -> (size: CGSize, origins: [CGPoint]) {
-        var origins: [CGPoint] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        var contentWidth: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > availableWidth {
-                x = 0
-                y += rowHeight + verticalSpacing
-                rowHeight = 0
-            }
-
-            origins.append(CGPoint(x: x, y: y))
-            contentWidth = max(contentWidth, x + size.width)
-            rowHeight = max(rowHeight, size.height)
-            x += size.width + horizontalSpacing
-        }
-
-        return (
-            CGSize(width: contentWidth, height: y + rowHeight),
-            origins
-        )
-    }
-}
-
 struct CompactNotchView: View {
     let layout: NotchLayout
     @ObservedObject var settingsStore: AppSettingsStore
@@ -773,7 +601,7 @@ struct MarkdownNoteEditor: View {
                 localization: MarkdownEditorLocalizationAdapter(language: settingsStore.language)
             )
             .background {
-                EditorFocusBinder(state: editorInteractionState)
+                EditorFocusBinder(state: editorInteractionState, documentID: store.activeTabID)
             }
 
             if store.text.isEmpty {
@@ -858,38 +686,6 @@ struct DarkIconButtonStyle: ButtonStyle {
             strokeOpacity: 0.06,
             foregroundOpacity: 0.76,
             pressedForegroundOpacity: 0.55
-        )
-    }
-}
-
-struct TabIconButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        RoundedHoverButtonBody(
-            configuration: configuration,
-            font: .system(size: 11, weight: .bold),
-            normalOpacity: 0,
-            hoverOpacity: 0.065,
-            pressedOpacity: 0.10,
-            strokeOpacity: 0,
-            foregroundOpacity: 0.72,
-            pressedForegroundOpacity: 0.48
-        )
-    }
-}
-
-struct TabDotButtonStyle: ButtonStyle {
-    let isSelected: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        RoundedHoverButtonBody(
-            configuration: configuration,
-            font: .system(size: 11, weight: .semibold),
-            normalOpacity: 0,
-            hoverOpacity: isSelected ? 0.075 : 0.055,
-            pressedOpacity: isSelected ? 0.10 : 0.08,
-            strokeOpacity: 0,
-            foregroundOpacity: 0.72,
-            pressedForegroundOpacity: 0.58
         )
     }
 }

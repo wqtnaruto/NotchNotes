@@ -2,7 +2,36 @@ import AppKit
 import SwiftUI
 
 @MainActor
+final class TitlePanelInteraction {
+    let state: TitleEditingState
+    private(set) var activationGeneration = 0
+
+    init(state: TitleEditingState, editor: EditorInteractionState, cancelCollapse: @escaping () -> Void) {
+        self.state = state
+        editor.isFocusSuspended = state.isEditing
+        state.onEditingChanged = { [weak self, weak editor] isEditing in
+            editor?.isFocusSuspended = isEditing
+            if isEditing {
+                self?.activationGeneration += 1
+                cancelCollapse()
+            }
+        }
+    }
+
+    func performAutomaticCollapse(_ action: () -> Void) {
+        guard !state.isEditing else { return }
+        action()
+    }
+
+    func performEditorActivation(generation: Int? = nil, _ action: () -> Void) {
+        guard !state.isEditing, generation == nil || generation == activationGeneration else { return }
+        action()
+    }
+}
+
+@MainActor
 final class NotchPanel: NSPanel {
+    weak var titleInteraction: TitlePanelInteraction?
     var onMouseEvent: ((NSEvent) -> Void)?
     var onEscape: (() -> Void)?
 
@@ -11,6 +40,15 @@ final class NotchPanel: NSPanel {
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, event.keyCode == 53 {
+            if let state = titleInteraction?.state, let session = state.session {
+                if let titleView = firstResponder as? TitleTextView, titleView.hasMarkedText() {
+                    super.sendEvent(event)
+                    return
+                }
+                state.cancel()
+                TitleTextView.restoreLabelFocus(tabID: session.tabID, window: self, state: state)
+                return
+            }
             onEscape?()
             return
         }
@@ -100,6 +138,11 @@ final class CompactFileDropHostingView<Content: View>: TransparentHitHostingView
 @MainActor
 final class NotchPanelController: NSObject {
     private let store = NoteStore()
+    private(set) lazy var titleEditingState = TitleEditingState(store: store)
+    private lazy var titleInteraction = TitlePanelInteraction(
+        state: titleEditingState, editor: editorInteractionState,
+        cancelCollapse: { [weak self] in self?.cancelCollapse() }
+    )
     private(set) var settingsStore = AppSettingsStore()
     private let imageStore = LocalImageStore()
     private let fileShelfStore = FileShelfStore()
@@ -136,6 +179,8 @@ final class NotchPanelController: NSObject {
         super.init()
         configurePanel(hotPanel)
         configurePanel(drawerPanel)
+        drawerPanel.titleInteraction = titleInteraction
+        hotPanel.titleInteraction = titleInteraction
         rebuildContent()
         startMousePolling()
         observeScreenChanges()
@@ -180,16 +225,18 @@ final class NotchPanelController: NSObject {
         hotPanel.orderOut(nil)
         setDrawerExpanded(true, animated: animated)
         guard activate else { return }
+        let generation = titleInteraction.activationGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) { [weak self] in
-            guard let self else { return }
-            guard self.isExpanded else { return }
-            self.activateEditor()
+            guard let self, self.isExpanded else { return }
+            self.titleInteraction.performEditorActivation(generation: generation) {
+                self.activateEditor()
+            }
         }
     }
 
     func collapse(animated: Bool) {
-        guard isExpanded else { return }
-        if let range = editorInteractionState.currentSelectionRange() {
+        guard isExpanded, !titleEditingState.isEditing else { return }
+        if let range = editorInteractionState.currentSelectionRange(for: store.activeTabID) {
             store.updateSelection(for: store.activeTabID, range: range)
         }
         store.flush(waitForDisk: false)
@@ -209,7 +256,7 @@ final class NotchPanelController: NSObject {
     }
 
     func createNote() {
-        if let range = editorInteractionState.currentSelectionRange() {
+        if let range = editorInteractionState.currentSelectionRange(for: store.activeTabID) {
             store.updateSelection(for: store.activeTabID, range: range)
         }
         store.addTab()
@@ -241,6 +288,7 @@ final class NotchPanelController: NSObject {
             workspaceState: workspaceState,
             drawerState: drawerState,
             editorInteractionState: editorInteractionState,
+            titleEditingState: titleEditingState,
             layout: layout
         )
 
@@ -374,7 +422,9 @@ final class NotchPanelController: NSObject {
                 if self.isExpanded,
                    !self.workspaceState.isPreviewingShelfItem,
                    !self.isPointInExpandedStayRegion(location) {
-                    self.collapse(animated: true)
+                    self.titleInteraction.performAutomaticCollapse {
+                        self.collapse(animated: true)
+                    }
                 } else {
                     self.handleMouseLocation(location)
                 }
@@ -430,6 +480,10 @@ final class NotchPanelController: NSObject {
         }
 
         if isExpanded {
+            if titleEditingState.isEditing {
+                cancelCollapse()
+                return
+            }
             if activeMenuTrackingCount > 0 {
                 cancelCollapse()
                 return
@@ -471,7 +525,7 @@ final class NotchPanelController: NSObject {
     }
 
     private func scheduleCollapse() {
-        guard collapseTask == nil else { return }
+        guard !titleEditingState.isEditing, collapseTask == nil else { return }
         guard activeMenuTrackingCount == 0 else { return }
 
         let task = DispatchWorkItem { [weak self] in
@@ -481,7 +535,9 @@ final class NotchPanelController: NSObject {
             guard !self.editorInteractionState.isDraggingSelection else { return }
             guard !self.workspaceState.isDraggingShelfItem else { return }
             guard !self.isPointInExpandedStayRegion(NSEvent.mouseLocation) else { return }
-            self.collapse(animated: true)
+            self.titleInteraction.performAutomaticCollapse {
+                self.collapse(animated: true)
+            }
         }
 
         collapseTask = task
@@ -571,14 +627,17 @@ final class NotchPanelController: NSObject {
     }
 
     private func activateEditor() {
-        NSApp.activate(ignoringOtherApps: true)
-        drawerPanel.makeKeyAndOrderFront(nil)
-        editorInteractionState.restoreSelection(
-            store.selectionRange(for: store.activeTabID),
-            searchingIn: hostingView
-        )
-        editorInteractionState.requestLayoutRefresh(searchingIn: hostingView)
-        editorInteractionState.requestFocus(searchingIn: hostingView)
+        titleInteraction.performEditorActivation {
+            NSApp.activate(ignoringOtherApps: true)
+            drawerPanel.makeKeyAndOrderFront(nil)
+            editorInteractionState.prepareForDocument(store.activeTabID)
+            editorInteractionState.restoreSelection(
+                store.selectionRange(for: store.activeTabID),
+                searchingIn: hostingView
+            )
+            editorInteractionState.requestLayoutRefresh(searchingIn: hostingView)
+            editorInteractionState.requestFocus(searchingIn: hostingView)
+        }
     }
 
     private func currentLayout() -> NotchLayout {
