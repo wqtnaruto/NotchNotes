@@ -1,6 +1,6 @@
 # 分页标题重命名：选型理由
 
-> 范围：NotchNotes 单仓库；状态：用户已确认方案，T1 导航与 T2 基本改名已实现并通过自动化验证；T3–T5 待执行。
+> 范围：NotchNotes 单仓库；状态：用户已确认方案，T1 导航、T2 基本改名与 T3 离开编辑统一确认已实现并通过自动化验证；T4–T5 待执行。
 > 产品依据：`NotchNotes/docs/prd/PRD.md` 与 `NotchNotes/SPEC.md`。本文件只保存取舍，具体契约集中在技术设计中。
 
 ## D1：自定义标题随分页保存
@@ -89,3 +89,15 @@
 - 分页原生按钮第二次 mouseDown 开始改名；当前与非当前目标均用 UUID，输入框沿用初始标题槽位宽度。更新只同步错误说明，不重设草稿或选区。错误以栏下 overlay 显示，不撑高导航栏；三种中英文文案与 PRD 逐字一致。
 - RED/GREEN：规则 3 项、存储新增 9 项、会话 4 项、输入 5 项、正文隔离 4 项、窗口保护 3 项、分页新增 3 项及本地化新增 1 项均经过预期断言失败再实现。C2 验证：指定过滤集 43 项、分页过滤集 6 项通过；完整 `swift test` 为 76 项、0 失败，`swift build` 成功。
 - 阶段边界：T2 以双击、Enter/Esc 验证闭环；点击外部、菜单新建/隐藏和应用失活的统一保存仍由 T3 接入，当前编辑时显式隐藏暂时拒绝。完整 IME、纯文本粘贴、独立撤销及可访问改名由 T4 完成，删除/退出由 T5 完成。真实窗口视觉、输入法、VoiceOver 和正常退出重启均未人工验收，不发布；本轮不提交或推送。
+
+## T3 实施记录
+
+- 门控仍集中在 `TitlePanelInteraction`（进程内单测），不在测试里构造真实控制器。新增 `performNavigationAction`/`performExplicitHide`/`performAppDeactivationSave`/`performMenuAction` 与 `begin/endMenuTracking`，共用私有 `commitThenPerform`：无会话直接放行，有会话先 `commitIfNeeded`，成功才执行动作。`commitIfNeeded` 自带 `isCommitting` 防重入，重复通知/delegate 重入不会重复写盘或重放动作（`testSaveFailure` 连开三次离开均被拒且动作计数为 0）。
+- **踩坑（测试前提）**：`TitleArchiveWriter.write` 每次调用先 `count += 1` 再判失败抛错，`writeCount` 统计的是「写入尝试次数」而非成功次数；失败写仍会让计数增长。早期用 `writeCount == before` 断言「失败不落盘」是错的（实际 5≠2、3≠2），改为真正的不变量：`customTitle` 仍为 nil、分页数量不变、动作计数为 0、会话保留。
+- **踩坑（基线）**：`TitleFixture.init` 会先 `store.flush()` 一次，`writeCount` 起点非 0；断言必须相对进入前捕获的 `before`，不能假设从 0 起。
+- **踩坑（编译）**：`NSWindow` 没有 `convert(_:from:)`/`hitTest(_:)`，这些是 `NSView` 方法；`isEventInsideTitleEditor` 需经 `contentView.convert(...)` + `contentView.hitTest(...)`，否则 `swift build` 直接失败。
+- 事件接线按设计 5.4 放在窗口分发层：`NotchPanel.sendEvent` 对命中区在标题外的 `leftMouseDown` 先过 `performNavigationAction`，失败则置 `isConsumingMouseSequence` 吞掉本次 down 及随后的 drag/up，避免孤立 mouseUp 触发新动作。因此标签单击、固定“＋”、双击另一页的鼠标路径会在 SwiftUI/AppKit 控件收到事件前被门控消费，无须把门控注入视图。键盘与辅助技术入口归 T4。
+- `createNote()`（菜单 Cmd+N）不经过窗口鼠标事件，作为独立离开入口单独包 `performNavigationAction`。`collapse(animated:)` 重定义为显式隐藏（`performExplicitHide`），拆出无门控的 `performCollapse`；全局 mouseUp 与 `scheduleCollapse` 两条自动收起路径改调 `performCollapse`，仍由外层 `performAutomaticCollapse` 保证会话内一律拒绝。
+- 应用失活只监听 `NSApplication.didResignActiveNotification`，走 `performAppDeactivationSave(reactivate: {})`——无论成败都不重新激活应用；菜单跟踪用 `activeMenuTrackingCount` 的 0↔1 边沿驱动 `begin/endMenuTracking`，跟踪期间的离开请求既不提交也不放行。
+- **已知债（不阻塞 T3，留待后续核实）**：① 设计 5.4「取消菜单后确已离开且应用活跃则再尝试提交」未在 T3 落地，当前依赖 sendEvent/全局路径处理真正离开，菜单自身不主动补存；② `sendEvent` 门控依赖输入框 `updateDraft` 实时同步草稿，带 marked text 时鼠标点击离开的「先 `unmarkText()` 再读完整串」路径属组字闭环，与键盘入口一并在 T4 覆盖；③ `isEventInsideTitleEditor` 用 `firstResponder`+hitTest 判定「标题内」，其真实性能（首响、输入法候选窗、滚动容器命中）需真实窗口人工验收，本层单测不冒充端到端。
+- 验证：`testValidDraftCommitsBeforeSwitchOrAdd`、`testInvalidDraftBlocksClickAndCommandN`、`testSaveFailureDoesNotReplayDeferredAction`、`testExplicitHideCommitsOrStaysOpen`、`testAppDeactivationPreservesFailedDraftWithoutReactivation`、`testMenuTrackingDoesNotCommitCurrentDraft` 六项先看到方法不存在的编译失败，再经 GREEN 与断言前提修正后全部通过；C3 指定过滤集 17 项、完整 `swift test` 为 92 项、0 失败，`swift build` 成功。控制器真实事件接线（首响、菜单跟踪、失活、点击离开）未做人工验收，不发布；本轮不提交推送。

@@ -5,6 +5,8 @@ import SwiftUI
 final class TitlePanelInteraction {
     let state: TitleEditingState
     private(set) var activationGeneration = 0
+    /// 上下文菜单跟踪期间，临时失焦不得提交当前草稿（设计 5.4）。
+    private var isMenuTracking = false
 
     init(state: TitleEditingState, editor: EditorInteractionState, cancelCollapse: @escaping () -> Void) {
         self.state = state
@@ -27,6 +29,48 @@ final class TitlePanelInteraction {
         guard !state.isEditing, generation == nil || generation == activationGeneration else { return }
         action()
     }
+
+    // MARK: - T3 离开编辑与导航/收起/失焦的统一确认门控
+
+    /// 切页、双击另一页、固定“＋”、菜单新建等「离开编辑再执行原动作」的入口。
+    /// 合法草稿先提交成功才放行原动作；非法/写失败时保留会话与原动作前状态，不放行。
+    /// 菜单跟踪期间的离开请求既不提交也不放行。
+    @discardableResult
+    func performNavigationAction(_ action: () -> Void) -> Bool {
+        if isMenuTracking { return false }
+        return commitThenPerform(action)
+    }
+
+    /// 显式隐藏（如 Cmd+W）：提交成功才隐藏，失败保持面板打开、会话不结束。
+    @discardableResult
+    func performExplicitHide(_ hide: () -> Void) -> Bool {
+        commitThenPerform(hide)
+    }
+
+    /// 应用失活：先尝试提交；成功才允许调用方按需重新激活，失败保留草稿且不抢焦点。
+    @discardableResult
+    func performAppDeactivationSave(reactivate: () -> Void) -> Bool {
+        guard commitThenPerform({}) else { return false }
+        reactivate()
+        return true
+    }
+
+    /// 上下文菜单动作按自身语义执行，绝不因打开/操作菜单而提交当前草稿。
+    func performMenuAction(_ action: () -> Void) {
+        action()
+    }
+
+    func beginMenuTracking() { isMenuTracking = true }
+    func endMenuTracking() { isMenuTracking = false }
+
+    /// 统一提交原语：无会话直接放行；有会话则先 commitIfNeeded，成功才执行动作。
+    /// commitIfNeeded 内部已有 isCommitting 防重入，重复调用不会重复写盘或重复放行动作。
+    private func commitThenPerform(_ action: () -> Void) -> Bool {
+        guard state.isEditing else { action(); return true }
+        guard state.commitIfNeeded() else { return false }
+        action()
+        return true
+    }
 }
 
 @MainActor
@@ -34,6 +78,8 @@ final class NotchPanel: NSPanel {
     weak var titleInteraction: TitlePanelInteraction?
     var onMouseEvent: ((NSEvent) -> Void)?
     var onEscape: (() -> Void)?
+    /// 标题外点击提交失败后，消费同一手势的后续拖动/up，避免孤立 mouseUp 触发新动作（设计 5.4）。
+    private var isConsumingMouseSequence = false
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -53,11 +99,37 @@ final class NotchPanel: NSPanel {
             return
         }
 
+        if event.type == .leftMouseDown,
+           let interaction = titleInteraction,
+           interaction.state.isEditing,
+           !isEventInsideTitleEditor(event) {
+            // 离开标题：先同步提交；成功则放行同一个事件继续分发，失败则消费整个手势。
+            if !interaction.performNavigationAction({}) {
+                isConsumingMouseSequence = true
+                return
+            }
+        } else if event.type == .leftMouseDragged || event.type == .leftMouseUp {
+            if isConsumingMouseSequence {
+                if event.type == .leftMouseUp { isConsumingMouseSequence = false }
+                return
+            }
+        }
+
         if event.type == .leftMouseDown || event.type == .leftMouseDragged || event.type == .leftMouseUp {
             onMouseEvent?(event)
         }
 
         super.sendEvent(event)
+    }
+
+    /// 命中标题输入框（含其滚动容器）时交给原生文本系统处理，不触发提交（设计 5.4）。
+    private func isEventInsideTitleEditor(_ event: NSEvent) -> Bool {
+        guard let titleView = firstResponder as? TitleTextView, let contentView else { return false }
+        let point = contentView.convert(event.locationInWindow, from: nil)
+        guard let hit = contentView.hitTest(point) else { return false }
+        return hit == titleView
+            || hit.isDescendant(of: titleView)
+            || titleView.isDescendant(of: hit)
     }
 }
 
@@ -187,6 +259,7 @@ final class NotchPanelController: NSObject {
         observePanelMouseEvents()
         observeGlobalMouseEvents()
         observeMenuTracking()
+        observeApplicationDeactivation()
     }
 
     func showDocked() {
@@ -235,7 +308,15 @@ final class NotchPanelController: NSObject {
     }
 
     func collapse(animated: Bool) {
-        guard isExpanded, !titleEditingState.isEditing else { return }
+        // 显式隐藏（Cmd+W / 菜单隐藏）：存在会话时先确认，失败不隐藏（设计 5.5）。
+        titleInteraction.performExplicitHide { [weak self] in
+            self?.performCollapse(animated: animated)
+        }
+    }
+
+    /// 无会话门控的实际收起；自动收起需由调用方先过 performAutomaticCollapse（检查 !isEditing）。
+    private func performCollapse(animated: Bool) {
+        guard isExpanded else { return }
         if let range = editorInteractionState.currentSelectionRange(for: store.activeTabID) {
             store.updateSelection(for: store.activeTabID, range: range)
         }
@@ -256,6 +337,13 @@ final class NotchPanelController: NSObject {
     }
 
     func createNote() {
+        // Cmd+N / 菜单新建是独立于鼠标事件的离开入口，需与点击共用同一提交门控（设计 5.4）。
+        titleInteraction.performNavigationAction { [weak self] in
+            self?.performCreateNote()
+        }
+    }
+
+    private func performCreateNote() {
         if let range = editorInteractionState.currentSelectionRange(for: store.activeTabID) {
             store.updateSelection(for: store.activeTabID, range: range)
         }
@@ -423,7 +511,7 @@ final class NotchPanelController: NSObject {
                    !self.workspaceState.isPreviewingShelfItem,
                    !self.isPointInExpandedStayRegion(location) {
                     self.titleInteraction.performAutomaticCollapse {
-                        self.collapse(animated: true)
+                        self.performCollapse(animated: true)
                     }
                 } else {
                     self.handleMouseLocation(location)
@@ -447,6 +535,21 @@ final class NotchPanelController: NSObject {
         )
     }
 
+    /// 只监听应用真正失活；输入法候选窗口/菜单短暂夺取 key 不在此列（已由菜单跟踪覆盖）。
+    private func observeApplicationDeactivation() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidResignActive(_:)),
+            name: NSApplication.didResignActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func applicationDidResignActive(_ notification: Notification) {
+        // 失焦尝试提交；无论成功失败都不重新激活应用，失败时保留会话与草稿（设计 5.5）。
+        titleInteraction.performAppDeactivationSave(reactivate: {})
+    }
+
     @objc private func screenParametersChanged(_ notification: Notification) {
         let layout = currentLayout()
         cancelCollapse()
@@ -460,12 +563,14 @@ final class NotchPanelController: NSObject {
     }
 
     @objc private func menuTrackingDidBegin(_ notification: Notification) {
+        if activeMenuTrackingCount == 0 { titleInteraction.beginMenuTracking() }
         activeMenuTrackingCount += 1
         cancelCollapse()
     }
 
     @objc private func menuTrackingDidEnd(_ notification: Notification) {
         activeMenuTrackingCount = max(0, activeMenuTrackingCount - 1)
+        if activeMenuTrackingCount == 0 { titleInteraction.endMenuTracking() }
         guard activeMenuTrackingCount == 0, isExpanded else { return }
         handleMouseLocation(NSEvent.mouseLocation)
     }
@@ -536,7 +641,7 @@ final class NotchPanelController: NSObject {
             guard !self.workspaceState.isDraggingShelfItem else { return }
             guard !self.isPointInExpandedStayRegion(NSEvent.mouseLocation) else { return }
             self.titleInteraction.performAutomaticCollapse {
-                self.collapse(animated: true)
+                self.performCollapse(animated: true)
             }
         }
 
