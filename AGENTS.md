@@ -2,6 +2,8 @@
 
 ## 项目事实与流程适用范围
 
+- 普通展开默认使用刘海区域左键点按，首次升级执行一次性设置迁移；仍可在设置中选择悬停。文件拖入使用独立扩大范围，触发规则与取舍见 `docs/intent/notch-click-activation.md`。
+
 - 本仓库是原生 macOS 应用，使用 Swift 6、SwiftPM、AppKit 与 SwiftUI，最低支持 macOS 14。
 - 代码当前托管于 GitHub：`https://github.com/wqtnaruto/NotchNotes.git`，默认分支为 `main`；现有 CI 是 `.github/workflows/release.yml`，在 macOS runner 上执行 `swift test` 并打包发布。
 - 本次采用单仓库初始化，没有工作区锚点；需求级产物按下方降级规则落在仓库内，PRD 路径为 `docs/prd/PRD.md`。

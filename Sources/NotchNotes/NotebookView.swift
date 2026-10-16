@@ -571,7 +571,7 @@ struct CompactNotchView: View {
     }
 
     private var activationSize: NSSize {
-        NSSize(width: layout.notchSize.width, height: layout.compactSize.height)
+        layout.notchSize
     }
 }
 

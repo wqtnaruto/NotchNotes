@@ -30,12 +30,12 @@ enum TriggerMode: String, CaseIterable, Identifiable {
 final class AppSettingsStore: ObservableObject {
     @Published var triggerMode: TriggerMode {
         didSet {
-            UserDefaults.standard.set(triggerMode.rawValue, forKey: Self.triggerModeKey)
+            defaults.set(triggerMode.rawValue, forKey: Self.triggerModeKey)
         }
     }
     @Published var language: AppLanguage {
         didSet {
-            UserDefaults.standard.set(language.rawValue, forKey: Self.languageKey)
+            defaults.set(language.rawValue, forKey: Self.languageKey)
         }
     }
     @Published private(set) var isKeepingAwake = false
@@ -43,21 +43,22 @@ final class AppSettingsStore: ObservableObject {
     @Published private(set) var keepAwakeErrorMessage: String?
 
     private static let triggerModeKey = "notchNotes.triggerMode"
+    private static let completedClickTriggerMigrationKey = "notchNotes.completedClickTriggerMigrationV1"
     private static let languageKey = "notchNotes.language"
     private static let ownsSleepDisabledKey = "notchNotes.ownsSleepDisabled"
     private static let completedSleepGuardMigrationKey = "notchNotes.completedSleepGuardRecoveryV1"
     private var caffeinateProcess: Process?
     private let systemSleepGuard = SystemSleepGuard()
     private var keepAwakeTask: Task<Void, Never>?
+    private let defaults: UserDefaults
 
-    init() {
-        let rawMode = UserDefaults.standard.string(forKey: Self.triggerModeKey)
-        triggerMode = rawMode.flatMap(TriggerMode.init(rawValue:)) ?? .hover
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        triggerMode = Self.loadTriggerMode(from: defaults)
 
-        let rawLanguage = UserDefaults.standard.string(forKey: Self.languageKey)
+        let rawLanguage = defaults.string(forKey: Self.languageKey)
         language = rawLanguage.flatMap(AppLanguage.init(rawValue:)) ?? .chinese
 
-        let defaults = UserDefaults.standard
         let needsOwnedStateRecovery = defaults.bool(forKey: Self.ownsSleepDisabledKey)
         let needsLegacyRecovery = !defaults.bool(forKey: Self.completedSleepGuardMigrationKey)
             && SystemSleepGuard.isSleepDisabled()
@@ -72,6 +73,16 @@ final class AppSettingsStore: ObservableObject {
             defaults.set(true, forKey: Self.completedSleepGuardMigrationKey)
             defaults.set(false, forKey: Self.ownsSleepDisabledKey)
         }
+    }
+
+    private static func loadTriggerMode(from defaults: UserDefaults) -> TriggerMode {
+        // 仅首次升级切换为点按；之后保留用户主动选择的悬停模式。
+        if !defaults.bool(forKey: completedClickTriggerMigrationKey) {
+            defaults.set(TriggerMode.click.rawValue, forKey: triggerModeKey)
+            defaults.set(true, forKey: completedClickTriggerMigrationKey)
+            return .click
+        }
+        return defaults.string(forKey: triggerModeKey).flatMap(TriggerMode.init(rawValue:)) ?? .click
     }
 
     func toggleKeepAwake() {
@@ -180,7 +191,7 @@ final class AppSettingsStore: ObservableObject {
 
         setOwnsSleepDisabled(!didReset)
         if didReset {
-            UserDefaults.standard.set(true, forKey: Self.completedSleepGuardMigrationKey)
+            defaults.set(true, forKey: Self.completedSleepGuardMigrationKey)
         }
         isKeepingAwake = !didReset && SystemSleepGuard.isSleepDisabled()
         isChangingKeepAwake = false
@@ -191,6 +202,6 @@ final class AppSettingsStore: ObservableObject {
     }
 
     private func setOwnsSleepDisabled(_ ownsSleepDisabled: Bool) {
-        UserDefaults.standard.set(ownsSleepDisabled, forKey: Self.ownsSleepDisabledKey)
+        defaults.set(ownsSleepDisabled, forKey: Self.ownsSleepDisabledKey)
     }
 }

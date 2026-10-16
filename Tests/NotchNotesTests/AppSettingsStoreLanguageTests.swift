@@ -4,28 +4,27 @@ import XCTest
 
 @MainActor
 final class AppSettingsStoreLanguageTests: XCTestCase {
-    private let suiteName = "AppSettingsStoreLanguageTests"
-
-    override func setUp() {
-        super.setUp()
-        UserDefaults.standard.removeObject(forKey: "notchNotes.language")
+    func testDefaultLanguageIsChinese() throws {
+        try withIsolatedSettings { defaults in
+            XCTAssertEqual(AppSettingsStore(defaults: defaults).language, .chinese)
+        }
     }
 
-    override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: "notchNotes.language")
-        super.tearDown()
+    func testLanguagePersistsAcrossInstances() throws {
+        try withIsolatedSettings { defaults in
+            let firstStore = AppSettingsStore(defaults: defaults)
+            firstStore.language = .english
+            XCTAssertEqual(AppSettingsStore(defaults: defaults).language, .english)
+        }
     }
+}
 
-    func testDefaultLanguageIsChinese() {
-        let store = AppSettingsStore()
-        XCTAssertEqual(store.language, .chinese)
-    }
-
-    func testLanguagePersistsAcrossInstances() {
-        let firstStore = AppSettingsStore()
-        firstStore.language = .english
-
-        let secondStore = AppSettingsStore()
-        XCTAssertEqual(secondStore.language, .english)
-    }
+@MainActor
+func withIsolatedSettings(_ body: (UserDefaults) throws -> Void) throws {
+    let suiteName = "NotchNotesSettingsTests.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    // 不在偏好设置测试中触发真实系统防休眠恢复。
+    defaults.set(true, forKey: "notchNotes.completedSleepGuardRecoveryV1")
+    try body(defaults)
 }

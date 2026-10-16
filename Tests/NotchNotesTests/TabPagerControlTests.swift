@@ -177,15 +177,8 @@ private final class PagerFixture {
         store = NoteStore(defaults: defaults, archiveURL: directory.appendingPathComponent("notes.json"))
         state = TitleEditingState(store: store)
         // 避免设置对象的防休眠恢复逻辑影响测试环境。
-        let standard = UserDefaults.standard
-        let keys = ["notchNotes.completedSleepGuardRecoveryV1", "notchNotes.ownsSleepDisabled"]
-        let previous = keys.map { standard.object(forKey: $0) }
-        standard.set(true, forKey: keys[0])
-        standard.set(false, forKey: keys[1])
-        let settings = AppSettingsStore()
-        for (key, value) in zip(keys, previous) {
-            if let value { standard.set(value, forKey: key) } else { standard.removeObject(forKey: key) }
-        }
+        defaults.set(true, forKey: "notchNotes.completedSleepGuardRecoveryV1")
+        let settings = AppSettingsStore(defaults: defaults)
         host = NSHostingView(rootView: TabPagerControl(
             store: store, editorInteractionState: EditorInteractionState(),
             availableWidth: 360, settingsStore: settings, titleEditingState: state

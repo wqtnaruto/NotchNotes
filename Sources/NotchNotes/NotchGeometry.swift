@@ -73,19 +73,20 @@ enum NotchGeometry {
     }
 
     static func activationFrame(for layout: NotchLayout, in screenFrame: NSRect) -> NSRect {
-        let activationSize = NSSize(
-            width: layout.notchSize.width,
-            height: layout.compactSize.height
-        )
         return topCenteredFrame(
-            for: activationSize,
+            for: layout.notchSize,
             topY: screenFrame.maxY + layout.compactTopOffset,
             in: screenFrame
         )
     }
 
     static func fileDropFrame(for layout: NotchLayout, in screenFrame: NSRect) -> NSRect {
-        var frame = activationFrame(for: layout, in: screenFrame)
+        // 文件拖入保留原有扩大范围，不随普通鼠标命中区域收紧。
+        var frame = topCenteredFrame(
+            for: NSSize(width: layout.notchSize.width, height: layout.compactSize.height),
+            topY: screenFrame.maxY + layout.compactTopOffset,
+            in: screenFrame
+        )
         frame.origin.y -= fileDropTargetExtension
         frame.size.height += fileDropTargetExtension
         return frame

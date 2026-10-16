@@ -233,6 +233,7 @@ final class NotchPanelController: NSObject {
     private var isRevealedForFileDrag = false
     private var activeMenuTrackingCount = 0
     private var collapseTask: DispatchWorkItem?
+    private var completedDragChangeCount = NSPasteboard(name: .drag).changeCount
 
     override init() {
         hotPanel = NotchPanel(
@@ -460,8 +461,7 @@ final class NotchPanelController: NSObject {
         hotPanel.onMouseEvent = { [weak self] event in
             guard let self else { return }
             guard event.type == .leftMouseDown else { return }
-            guard self.activationFrame().contains(NSEvent.mouseLocation) else { return }
-            self.expand(animated: true, activate: true)
+            self.handleActivationClick(at: NotchActivationPolicy.screenLocation(for: event))
         }
 
         drawerPanel.onMouseEvent = { [weak self] event in
@@ -470,6 +470,7 @@ final class NotchPanelController: NSObject {
                 NSApp.activate(ignoringOtherApps: true)
                 self.drawerPanel.makeKeyAndOrderFront(nil)
             } else if event.type == .leftMouseUp {
+                self.completedDragChangeCount = NSPasteboard(name: .drag).changeCount
                 self.workspaceState.isDraggingShelfItem = false
                 self.resetFileDropState()
             }
@@ -481,15 +482,11 @@ final class NotchPanelController: NSObject {
     }
 
     private func observeGlobalMouseEvents() {
-        globalMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] _ in
+        globalMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            // 在派发到主 actor 前保存事件位置，避免快速移动后的鼠标位置影响命中判断。
+            let location = event.locationInWindow
             Task { @MainActor in
-                guard let self,
-                      !self.isExpanded,
-                      self.settingsStore.triggerMode == .click,
-                      self.activationFrame().contains(NSEvent.mouseLocation) else {
-                    return
-                }
-                self.expand(animated: true, activate: true)
+                self?.handleActivationClick(at: location)
             }
         }
 
@@ -503,6 +500,7 @@ final class NotchPanelController: NSObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.editorInteractionState.noteGlobalMouseUp()
+                self.completedDragChangeCount = NSPasteboard(name: .drag).changeCount
                 self.workspaceState.isDraggingShelfItem = false
                 self.resetFileDropState()
                 self.finishFileDragRevealIfNeeded()
@@ -576,6 +574,10 @@ final class NotchPanelController: NSObject {
     }
 
     private func handleMouseLocation(_ point: NSPoint) {
+        // 拖拽结束后剪贴板可能保留文件；下一次普通按下不能复用旧拖拽。
+        if NSEvent.pressedMouseButtons & 1 == 0 {
+            completedDragChangeCount = NSPasteboard(name: .drag).changeCount
+        }
         if !isExpanded, isFileDrag(at: point) {
             let layout = currentLayout()
             hotPanel.setFrame(fileDropFrame(for: layout), display: true)
@@ -622,11 +624,22 @@ final class NotchPanelController: NSObject {
             return
         }
 
-        if settingsStore.triggerMode == .hover,
-           NSEvent.pressedMouseButtons & 1 == 0,
-           activationFrame().contains(point) {
+        if NotchActivationPolicy.shouldExpand(
+            for: .mouseMoved, at: point, in: activationFrame(),
+            mode: settingsStore.triggerMode,
+            isLeftMousePressed: NSEvent.pressedMouseButtons & 1 != 0
+        ) {
             expand(animated: true, activate: false)
         }
+    }
+
+    private func handleActivationClick(at location: NSPoint) {
+        guard !isExpanded,
+              NotchActivationPolicy.shouldExpand(
+                for: .leftMouseDown, at: location, in: activationFrame(),
+                mode: settingsStore.triggerMode
+              ) else { return }
+        expand(animated: true, activate: true)
     }
 
     private func scheduleCollapse() {
@@ -776,11 +789,13 @@ final class NotchPanelController: NSObject {
     }
 
     private func isFileDrag(at point: NSPoint) -> Bool {
-        guard NSEvent.pressedMouseButtons & 1 == 1,
-              FileDropPasteboardReader.containsFileURLs(NSPasteboard(name: .drag)) else {
-            return false
-        }
-
-        return fileDropFrame(for: currentLayout()).contains(point)
+        let pasteboard = NSPasteboard(name: .drag)
+        return NotchActivationPolicy.shouldRevealForFileDrag(
+            at: point, in: fileDropFrame(for: currentLayout()),
+            isLeftMousePressed: NSEvent.pressedMouseButtons & 1 != 0,
+            containsFileURLs: FileDropPasteboardReader.containsFileURLs(pasteboard),
+            pasteboardChangeCount: pasteboard.changeCount,
+            completedDragChangeCount: completedDragChangeCount
+        )
     }
 }
