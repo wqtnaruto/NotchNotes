@@ -23,6 +23,27 @@ enum MarkdownDetection {
         for (index, token) in tokens.enumerated() {
             let start = token.range.location
             let end = NSMaxRange(token.range)
+            // A formatting command keeps the generated content selected so
+            // the user can immediately replace its placeholder. Treat that
+            // exact selection, and continued typing at its trailing edge, as
+            // rendered rather than as editing the Markdown syntax; otherwise
+            // markers such as `**` stay visible until an extra keystroke moves
+            // the selection.
+            let isInlineFormattingToken: Bool = {
+                switch token.kind {
+                case .bold, .italic, .boldItalic, .link, .inlineCode:
+                    return true
+                default:
+                    return false
+                }
+            }()
+            let selectsCompleteContent = selectionRange.length > 0
+                && NSEqualRanges(selectionRange, token.contentRange)
+            let isTypingAtContentEnd = selectionRange.length == 0
+                && caretLocation == NSMaxRange(token.contentRange)
+            if isInlineFormattingToken && (selectsCompleteContent || isTypingAtContentEnd) {
+                continue
+            }
             if selectionRange.length > 0 && (token.kind == .inlineLatex || token.kind == .blockLatex) && NSIntersectionRange(selectionRange, token.range).length > 0 {
                 indices.insert(index)
                 continue

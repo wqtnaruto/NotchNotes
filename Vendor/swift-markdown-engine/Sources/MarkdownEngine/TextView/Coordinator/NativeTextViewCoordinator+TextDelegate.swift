@@ -56,7 +56,8 @@ extension NativeTextViewCoordinator {
         let fullLength = (tv.string as NSString).length
         guard !tv.hasMarkedText() else { return }
         let safeLocation = min(rawSelRange.location, fullLength)
-        let safeSelRange = NSRange(location: safeLocation, length: 0)
+        let safeLength = min(rawSelRange.length, fullLength - safeLocation)
+        let safeSelRange = NSRange(location: safeLocation, length: safeLength)
         previousCaretLocation = safeSelRange.location
         if !wtActive {
             let storageState = WikiLinkService.makeStorageState(

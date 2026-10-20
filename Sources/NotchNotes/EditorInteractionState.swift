@@ -2,6 +2,39 @@ import AppKit
 import MarkdownEngine
 import SwiftUI
 
+struct MarkdownShortcut: Equatable {
+    let key: Character
+    let modifiers: EventModifiers
+    let displayKey: String
+
+    var keyEquivalent: KeyEquivalent {
+        KeyEquivalent(key)
+    }
+
+    var displayText: String {
+        modifierSymbols + displayKey
+    }
+
+    var spokenText: String {
+        var parts: [String] = []
+        if modifiers.contains(.command) { parts.append("Command") }
+        if modifiers.contains(.shift) { parts.append("Shift") }
+        if modifiers.contains(.option) { parts.append("Option") }
+        if modifiers.contains(.control) { parts.append("Control") }
+        parts.append(displayKey)
+        return parts.joined(separator: " + ")
+    }
+
+    private var modifierSymbols: String {
+        var symbols = ""
+        if modifiers.contains(.command) { symbols += "⌘" }
+        if modifiers.contains(.shift) { symbols += "⇧" }
+        if modifiers.contains(.option) { symbols += "⌥" }
+        if modifiers.contains(.control) { symbols += "⌃" }
+        return symbols
+    }
+}
+
 enum MarkdownCommand: CaseIterable, Identifiable {
     case bold
     case italic
@@ -39,6 +72,40 @@ enum MarkdownCommand: CaseIterable, Identifiable {
         case .orderedList: return language.localized(.numberedList)
         case .todoList: return language.localized(.todoList)
         }
+    }
+
+    var shortcut: MarkdownShortcut {
+        switch self {
+        case .bold:
+            return MarkdownShortcut(key: "b", modifiers: [.command], displayKey: "B")
+        case .italic:
+            return MarkdownShortcut(key: "i", modifiers: [.command], displayKey: "I")
+        case .strikethrough:
+            return MarkdownShortcut(key: "x", modifiers: [.command, .shift], displayKey: "X")
+        case .inlineCode:
+            return MarkdownShortcut(key: "c", modifiers: [.command, .shift], displayKey: "C")
+        case .link:
+            return MarkdownShortcut(key: "k", modifiers: [.command], displayKey: "K")
+        case .quote:
+            return MarkdownShortcut(key: ".", modifiers: [.command, .shift], displayKey: ">")
+        case .unorderedList:
+            return MarkdownShortcut(key: "8", modifiers: [.command, .shift], displayKey: "8")
+        case .orderedList:
+            return MarkdownShortcut(key: "7", modifiers: [.command, .shift], displayKey: "7")
+        case .todoList:
+            return MarkdownShortcut(key: "9", modifiers: [.command, .shift], displayKey: "9")
+        }
+    }
+
+    func toolbarHelp(for language: AppLanguage) -> String {
+        "\(help(for: language))  \(shortcut.displayText)"
+    }
+
+    func accessibilityHelp(for language: AppLanguage) -> String {
+        if language == .chinese {
+            return "\(help(for: language))，快捷键 \(shortcut.spokenText)"
+        }
+        return "\(help(for: language)), Shortcut \(shortcut.spokenText)"
     }
 }
 
@@ -321,8 +388,13 @@ final class EditorInteractionState: ObservableObject {
     private func replaceText(in textView: NSTextView, range: NSRange, with replacement: String, selectionAfter: NSRange) {
         guard textView.shouldChangeText(in: range, replacementString: replacement) else { return }
         textView.textStorage?.replaceCharacters(in: range, with: replacement)
-        textView.didChangeText()
+        // MarkdownEngine restyles synchronously from `textDidChange` and reads
+        // the current selection to decide which token is active. Publish the
+        // completed edit only after the command's final selection is in place,
+        // otherwise styling is deferred until the next keystroke (often a
+        // space) causes another change notification.
         textView.setSelectedRange(selectionAfter)
+        textView.didChangeText()
     }
 
     private func safeSelectedRange(in textView: NSTextView) -> NSRange {

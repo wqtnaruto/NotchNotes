@@ -60,6 +60,19 @@ final class LocalizationTests: XCTestCase {
         XCTAssertEqual(AppLanguage.english.localized(.italic), "Italic")
     }
 
+    func testMarkdownShortcutHelpIsLocalizedAndAccessible() {
+        XCTAssertEqual(MarkdownCommand.bold.toolbarHelp(for: .chinese), "粗体  ⌘B")
+        XCTAssertEqual(MarkdownCommand.bold.toolbarHelp(for: .english), "Bold  ⌘B")
+        XCTAssertEqual(
+            MarkdownCommand.quote.accessibilityHelp(for: .chinese),
+            "引用，快捷键 Command + Shift + >"
+        )
+        XCTAssertEqual(
+            MarkdownCommand.quote.accessibilityHelp(for: .english),
+            "Quote, Shortcut Command + Shift + >"
+        )
+    }
+
     func testTriggerModeTitleStrings() {
         XCTAssertEqual(AppLanguage.chinese.localized(.triggerModeTitle), "触发方式")
         XCTAssertEqual(AppLanguage.english.localized(.triggerModeTitle), "Trigger")

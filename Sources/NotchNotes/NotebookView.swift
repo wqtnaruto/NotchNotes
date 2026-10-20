@@ -504,8 +504,9 @@ private struct MarkdownToolbarButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(MarkdownToolbarButtonStyle())
-        .toolbarTooltip(command.help(for: language))
-        .accessibilityLabel(command.help(for: language))
+        .keyboardShortcut(command.shortcut.keyEquivalent, modifiers: command.shortcut.modifiers)
+        .toolbarTooltip(command.toolbarHelp(for: language))
+        .accessibilityLabel(command.accessibilityHelp(for: language))
     }
 }
 
