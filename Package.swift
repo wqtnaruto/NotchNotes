@@ -19,7 +19,10 @@ let package = Package(
             dependencies: [
                 .product(name: "MarkdownEngine", package: "swift-markdown-engine")
             ],
-            path: "Sources/NotchNotes"
+            path: "Sources/NotchNotes",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .testTarget(
             name: "NotchNotesTests",

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -223,8 +224,11 @@ final class NotchPanelController: NSObject {
     private let editorInteractionState = EditorInteractionState()
     private let hotPanel: NotchPanel
     private let drawerPanel: NotchPanel
+    private let reminderPanel: NotchPanel
     private var hostingView: NSHostingView<NotebookView>?
     private var hotHostingView: CompactFileDropHostingView<CompactNotchView>?
+    private var reminderHostingView: FirstMouseHostingView<SedentaryReminderWidgetView>?
+    private var reminderCancellables = Set<AnyCancellable>()
     private var mousePollingTimer: Timer?
     private var globalMouseDownMonitor: Any?
     private var globalMouseDragMonitor: Any?
@@ -248,10 +252,18 @@ final class NotchPanelController: NSObject {
             backing: .buffered,
             defer: false
         )
+        reminderPanel = NotchPanel(
+            contentRect: .zero,
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
 
         super.init()
         configurePanel(hotPanel)
         configurePanel(drawerPanel)
+        configurePanel(reminderPanel)
+        reminderPanel.collectionBehavior = [.canJoinAllSpaces, .stationary]
         drawerPanel.titleInteraction = titleInteraction
         hotPanel.titleInteraction = titleInteraction
         rebuildContent()
@@ -261,6 +273,8 @@ final class NotchPanelController: NSObject {
         observeGlobalMouseEvents()
         observeMenuTracking()
         observeApplicationDeactivation()
+        observeReminderChanges()
+        observeSystemAvailability()
     }
 
     func showDocked() {
@@ -274,6 +288,9 @@ final class NotchPanelController: NSObject {
         hotPanel.orderFrontRegardless()
         drawerPanel.setFrame(drawerFrame(for: layout), display: true)
         drawerPanel.orderOut(nil)
+        reminderPanel.setFrame(reminderFrame(for: layout), display: true)
+        settingsStore.sedentaryReminder.setPresentationSuppressed(false)
+        updateReminderVisibility()
     }
 
     func expand(animated: Bool, activate: Bool = true) {
@@ -288,6 +305,8 @@ final class NotchPanelController: NSObject {
         cancelCollapse()
         isExpanded = true
         isRevealedForFileDrag = false
+        settingsStore.sedentaryReminder.setPresentationSuppressed(true)
+        reminderPanel.orderOut(nil)
         rebuildContent(layout: layout)
         drawerPanel.setFrame(drawerFrame(for: layout), display: true)
         if activate {
@@ -325,6 +344,7 @@ final class NotchPanelController: NSObject {
         isExpanded = false
         isRevealedForFileDrag = false
         workspaceState.isShelfDropTargeted = false
+        settingsStore.sedentaryReminder.setPresentationSuppressed(false)
         setDrawerExpanded(false, animated: animated)
         let delay: TimeInterval = animated ? 0.18 : 0
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -334,6 +354,8 @@ final class NotchPanelController: NSObject {
             self.drawerPanel.orderOut(nil)
             self.hotPanel.setFrame(self.hotFrame(for: layout), display: true)
             self.hotPanel.orderFrontRegardless()
+            self.reminderPanel.setFrame(self.reminderFrame(for: layout), display: true)
+            self.updateReminderVisibility()
         }
     }
 
@@ -369,6 +391,10 @@ final class NotchPanelController: NSObject {
     private func rebuildContent(layout: NotchLayout? = nil) {
         let layout = layout ?? currentLayout()
         let hotView = CompactNotchView(layout: layout, settingsStore: settingsStore)
+        let reminderView = SedentaryReminderWidgetView(
+            store: settingsStore.sedentaryReminder,
+            language: settingsStore.language
+        )
         let view = NotebookView(
             store: store,
             settingsStore: settingsStore,
@@ -393,6 +419,18 @@ final class NotchPanelController: NSObject {
             host.layer?.masksToBounds = true
             hotPanel.contentView = host
             hotHostingView = host
+        }
+
+        if let reminderHostingView {
+            reminderHostingView.rootView = reminderView
+        } else {
+            let host = FirstMouseHostingView(rootView: reminderView)
+            host.translatesAutoresizingMaskIntoConstraints = true
+            host.autoresizingMask = [.width, .height]
+            host.wantsLayer = true
+            host.layer?.masksToBounds = false
+            reminderPanel.contentView = host
+            reminderHostingView = host
         }
 
         if let hostingView {
@@ -455,6 +493,64 @@ final class NotchPanelController: NSObject {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+    }
+
+    private func observeReminderChanges() {
+        settingsStore.sedentaryReminder.$phase
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateReminderVisibility() }
+            .store(in: &reminderCancellables)
+        settingsStore.sedentaryReminder.$isEnabled
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateReminderVisibility() }
+            .store(in: &reminderCancellables)
+        settingsStore.sedentaryReminder.$isScreenAvailable
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateReminderVisibility() }
+            .store(in: &reminderCancellables)
+        settingsStore.$language
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuildContent() }
+            .store(in: &reminderCancellables)
+    }
+
+    private func observeSystemAvailability() {
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [
+            NSWorkspace.willSleepNotification,
+            NSWorkspace.screensDidSleepNotification,
+            NSWorkspace.sessionDidResignActiveNotification
+        ] {
+            center.addObserver(
+                self,
+                selector: #selector(systemBecameUnavailable(_:)),
+                name: name,
+                object: nil
+            )
+        }
+        for name in [
+            NSWorkspace.didWakeNotification,
+            NSWorkspace.screensDidWakeNotification,
+            NSWorkspace.sessionDidBecomeActiveNotification
+        ] {
+            center.addObserver(
+                self,
+                selector: #selector(systemBecameAvailable(_:)),
+                name: name,
+                object: nil
+            )
+        }
+    }
+
+    @objc private func systemBecameUnavailable(_ notification: Notification) {
+        settingsStore.sedentaryReminder.handleScreenUnavailable()
+        reminderPanel.orderOut(nil)
+    }
+
+    @objc private func systemBecameAvailable(_ notification: Notification) {
+        settingsStore.sedentaryReminder.handleScreenAvailable()
+        updateReminderVisibility()
     }
 
     private func observePanelMouseEvents() {
@@ -554,6 +650,8 @@ final class NotchPanelController: NSObject {
         rebuildContent(layout: layout)
         hotPanel.setFrame(hotFrame(for: layout), display: true)
         drawerPanel.setFrame(drawerFrame(for: layout), display: true)
+        reminderPanel.setFrame(reminderFrame(for: layout), display: true)
+        updateReminderVisibility()
     }
 
     @objc private func mousePollingTick(_ timer: Timer) {
@@ -726,6 +824,8 @@ final class NotchPanelController: NSObject {
         cancelCollapse()
         isExpanded = true
         isRevealedForFileDrag = true
+        settingsStore.sedentaryReminder.setPresentationSuppressed(true)
+        reminderPanel.orderOut(nil)
         drawerPanel.setFrame(drawerFrame(for: layout), display: true)
         drawerPanel.orderFrontRegardless()
         hotPanel.orderFrontRegardless()
@@ -740,6 +840,7 @@ final class NotchPanelController: NSObject {
     }
 
     func flush() {
+        settingsStore.sedentaryReminder.stopTicking()
         settingsStore.stopKeepingAwake()
         store.flush(waitForDisk: true)
     }
@@ -782,6 +883,23 @@ final class NotchPanelController: NSObject {
             topY: topY,
             in: screenFrame
         )
+    }
+
+    private func reminderFrame(for layout: NotchLayout) -> NSRect {
+        let screenFrame = targetScreenFrame()
+        let size = NSSize(width: 104, height: 158)
+        let topY = screenFrame.maxY - layout.notchSize.height + 4
+        return NotchGeometry.topCenteredFrame(for: size, topY: topY, in: screenFrame)
+    }
+
+    private func updateReminderVisibility() {
+        guard !isExpanded, !isRevealedForFileDrag,
+              settingsStore.sedentaryReminder.shouldDisplayWidget else {
+            reminderPanel.orderOut(nil)
+            return
+        }
+        reminderPanel.setFrame(reminderFrame(for: currentLayout()), display: true)
+        reminderPanel.orderFrontRegardless()
     }
 
     private func targetScreenFrame() -> NSRect {
