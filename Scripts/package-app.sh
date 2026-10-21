@@ -25,9 +25,26 @@ swift build \
   --arch x86_64 \
   --scratch-path "$BUILD_DIR"
 
-BINARY_PATH="$BUILD_DIR/apple/Products/Release/$APP_NAME"
-if [[ ! -x "$BINARY_PATH" ]]; then
-  echo "找不到构建产物：$BINARY_PATH" >&2
+PRODUCTS_DIR=""
+for candidate in \
+  "$BUILD_DIR/out/Products/Release" \
+  "$BUILD_DIR/apple/Products/Release"
+do
+  if [[ -x "$candidate/$APP_NAME" ]]; then
+    PRODUCTS_DIR="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$PRODUCTS_DIR" ]]; then
+  echo "找不到构建产物：$BUILD_DIR/{out,apple}/Products/Release/$APP_NAME" >&2
+  exit 1
+fi
+
+BINARY_PATH="$PRODUCTS_DIR/$APP_NAME"
+RESOURCE_BUNDLE="$PRODUCTS_DIR/${APP_NAME}_${APP_NAME}.bundle"
+if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
+  echo "找不到 SwiftPM 资源包：$RESOURCE_BUNDLE" >&2
   exit 1
 fi
 
@@ -41,6 +58,7 @@ rm -rf "$APP_DIR"
 rm -f "$ZIP_PATH" "$CHECKSUM_PATH"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BINARY_PATH" "$MACOS_DIR/$APP_NAME"
+cp -R "$RESOURCE_BUNDLE" "$RESOURCES_DIR/"
 cp "$SOURCE_PLIST" "$CONTENTS_DIR/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$APP_VERSION" "$CONTENTS_DIR/Info.plist"
 plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$CONTENTS_DIR/Info.plist"
@@ -73,6 +91,12 @@ else
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_DIR"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+
+REMINDER_ASSET="$RESOURCES_DIR/${APP_NAME}_${APP_NAME}.bundle/Contents/Resources/naruto-wind-chime-idle-v1.png"
+if [[ ! -f "$REMINDER_ASSET" ]]; then
+  echo "打包产物缺少久坐提醒资源：$REMINDER_ASSET" >&2
+  exit 1
+fi
 
 create_archive() {
   rm -f "$ZIP_PATH"

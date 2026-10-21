@@ -191,4 +191,94 @@ final class SedentaryReminderStoreTests: XCTestCase {
             XCTAssertFalse(store.isCardPresented)
         }
     }
+
+    func testSettingChangesApplyToTheNextRoundWithoutResettingCurrentCountdown() throws {
+        try withIsolatedSettings { defaults in
+            var uptime = 0.0
+            let store = SedentaryReminderStore(
+                defaults: defaults,
+                now: { uptime },
+                automaticallyTicks: false
+            )
+            store.interval = .thirty
+            store.setEnabled(true)
+
+            uptime = 100
+            store.tick()
+            XCTAssertEqual(store.remainingSeconds, 1_700)
+
+            store.interval = .ninety
+            store.tick()
+            XCTAssertEqual(store.remainingSeconds, 1_700)
+
+            store.skipCurrentRound()
+            XCTAssertEqual(store.remainingSeconds, 5_400)
+        }
+    }
+
+    func testChangingActivityDurationDoesNotResetAnActivityAlreadyInProgress() throws {
+        try withIsolatedSettings { defaults in
+            var uptime = 0.0
+            let store = SedentaryReminderStore(
+                defaults: defaults,
+                now: { uptime },
+                automaticallyTicks: false
+            )
+            store.activityDuration = .one
+            store.setEnabled(true)
+            store.startActivity()
+
+            uptime = 10
+            store.tick()
+            XCTAssertEqual(store.remainingSeconds, 50)
+
+            store.activityDuration = .five
+            store.tick()
+            XCTAssertEqual(store.remainingSeconds, 50)
+
+            store.endActivityEarly()
+            store.startActivity()
+            XCTAssertEqual(store.remainingSeconds, 300)
+        }
+    }
+
+    func testPausedReminderRejectsStaleActivityAndSkipActions() throws {
+        try withIsolatedSettings { defaults in
+            let store = SedentaryReminderStore(defaults: defaults, automaticallyTicks: false)
+            store.setEnabled(true)
+            store.pause()
+
+            store.startActivity()
+            store.skipCurrentRound()
+
+            XCTAssertTrue(store.isPaused)
+            XCTAssertEqual(store.phase, .paused)
+            XCTAssertEqual(store.remainingSeconds, 0)
+        }
+    }
+
+    func testDisablingClearsRuntimeStateButKeepsDurationsForReenable() throws {
+        try withIsolatedSettings { defaults in
+            let store = SedentaryReminderStore(defaults: defaults, automaticallyTicks: false)
+            store.interval = .ninety
+            store.activityDuration = .five
+            store.setEnabled(true)
+            store.startActivity()
+
+            store.setEnabled(false)
+
+            XCTAssertFalse(store.isEnabled)
+            XCTAssertFalse(store.isPaused)
+            XCTAssertFalse(store.shouldDisplayWidget)
+            XCTAssertFalse(store.isCardPresented)
+            XCTAssertEqual(store.phase, .disabled)
+            XCTAssertEqual(store.remainingSeconds, 0)
+            XCTAssertEqual(store.interval, .ninety)
+            XCTAssertEqual(store.activityDuration, .five)
+
+            store.setEnabled(true)
+            XCTAssertEqual(store.phase, .countingDown)
+            XCTAssertEqual(store.remainingSeconds, 5_400)
+        }
+    }
 }
