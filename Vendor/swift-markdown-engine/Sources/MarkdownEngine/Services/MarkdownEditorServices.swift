@@ -208,6 +208,9 @@ public struct MarkdownEditorBus: Sendable {
     public var findScrollToRange: Notification.Name?
     /// Posted by the host UI to clear all in-document find highlights.
     public var findClearHighlights: Notification.Name?
+    /// Posted when an external renderer (for example an async image store)
+    /// has new content and affected editor ranges should be restyled.
+    public var renderInvalidationRequest: Notification.Name?
 
     public init(
         applyBoldRequest: Notification.Name? = nil,
@@ -216,7 +219,8 @@ public struct MarkdownEditorBus: Sendable {
         selectionBoldDidChange: Notification.Name? = nil,
         selectionItalicDidChange: Notification.Name? = nil,
         findScrollToRange: Notification.Name? = nil,
-        findClearHighlights: Notification.Name? = nil
+        findClearHighlights: Notification.Name? = nil,
+        renderInvalidationRequest: Notification.Name? = nil
     ) {
         self.applyBoldRequest = applyBoldRequest
         self.applyItalicRequest = applyItalicRequest
@@ -225,6 +229,7 @@ public struct MarkdownEditorBus: Sendable {
         self.selectionItalicDidChange = selectionItalicDidChange
         self.findScrollToRange = findScrollToRange
         self.findClearHighlights = findClearHighlights
+        self.renderInvalidationRequest = renderInvalidationRequest
     }
 
     public static let `default` = MarkdownEditorBus()

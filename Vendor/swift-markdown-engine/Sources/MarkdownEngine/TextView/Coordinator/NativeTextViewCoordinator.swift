@@ -178,6 +178,11 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
                 self?.handleFindClearHighlights(notification)
             })
         }
+        if let name = bus.renderInvalidationRequest {
+            busObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                self?.handleAppearanceChange(notification)
+            })
+        }
     }
 
     // Find-in-document highlight handlers live in

@@ -66,6 +66,19 @@ extension MarkdownStyler {
         let configuration: MarkdownEditorConfiguration
 
         var services: MarkdownEditorServices { configuration.services }
+
+        var scanRanges: [NSRange] {
+            guard let scopedRanges, !scopedRanges.isEmpty else { return [fullRange] }
+            return scopedRanges.compactMap {
+                let clipped = NSIntersectionRange($0, fullRange)
+                return clipped.length > 0 ? clipped : nil
+            }
+        }
+
+        func isInScope(_ range: NSRange) -> Bool {
+            guard let scopedRanges, !scopedRanges.isEmpty else { return true }
+            return scopedRanges.contains { NSIntersectionRange($0, range).length > 0 }
+        }
     }
 }
 
@@ -152,6 +165,7 @@ enum MarkdownStyler {
             baseFont: baseFont,
             nsText: nsText,
             fullRange: fullRange,
+            scanRanges: ctx.scanRanges,
             listsEnabled: listsEnabled,
             defaultLineHeight: baseDefaultLineHeight,
             defaultParagraphSpacing: baseParagraphSpacing,
@@ -328,14 +342,16 @@ extension MarkdownStyler {
         var attrs: [StyledRange] = []
         let hrPattern = "^[ \\t]*-{3,}[ \\t]*$"
         if let hrRegex = try? NSRegularExpression(pattern: hrPattern, options: [.anchorsMatchLines]) {
-            for hrMatch in hrRegex.matches(in: ctx.text, range: ctx.fullRange) {
-                attrs.append((hrMatch.range, [.foregroundColor: NSColor.clear]))
-                attrs.append((hrMatch.range, [
-                    .strikethroughStyle: NSUnderlineStyle.thick.rawValue,
-                    .strikethroughColor: ctx.configuration.theme.strikethroughColor
-                ]))
-                let rulePara = NSMutableParagraphStyle()
-                attrs.append((hrMatch.range, [.paragraphStyle: rulePara]))
+            for scanRange in ctx.scanRanges {
+                for hrMatch in hrRegex.matches(in: ctx.text, range: scanRange) {
+                    attrs.append((hrMatch.range, [.foregroundColor: NSColor.clear]))
+                    attrs.append((hrMatch.range, [
+                        .strikethroughStyle: NSUnderlineStyle.thick.rawValue,
+                        .strikethroughColor: ctx.configuration.theme.strikethroughColor
+                    ]))
+                    let rulePara = NSMutableParagraphStyle()
+                    attrs.append((hrMatch.range, [.paragraphStyle: rulePara]))
+                }
             }
         }
         return attrs
@@ -346,18 +362,20 @@ extension MarkdownStyler {
     static func styleIncompleteLinkBrackets(_ ctx: StylingContext) -> [StyledRange] {
         var attrs: [StyledRange] = []
         for regex in MarkdownStyler.incompleteLinkRegexes {
-            for match in regex.matches(in: ctx.text, options: [], range: ctx.fullRange) {
-                let matchRange = match.range
-                if MarkdownDetection.isInsideCodeBlock(range: matchRange, codeTokens: ctx.codeTokens) { continue }
-                let substring = ctx.nsText.substring(with: matchRange)
-                for (i, char) in substring.enumerated() {
-                    let location = matchRange.location + i
-                    if char == "[" || char == "]" || char == "(" || char == ")" {
-                        let markerRange = NSRange(location: location, length: 1)
-                        attrs.append((markerRange, [.foregroundColor: ctx.configuration.theme.mutedText]))
-                    } else {
-                        let contentRange = NSRange(location: location, length: 1)
-                        attrs.append((contentRange, [.foregroundColor: ctx.configuration.theme.incompleteLink.withAlphaComponent(ctx.configuration.link.incompleteLinkAlpha)]))
+            for scanRange in ctx.scanRanges {
+                for match in regex.matches(in: ctx.text, options: [], range: scanRange) {
+                    let matchRange = match.range
+                    if MarkdownDetection.isInsideCodeBlock(range: matchRange, codeTokens: ctx.codeTokens) { continue }
+                    let substring = ctx.nsText.substring(with: matchRange)
+                    for (i, char) in substring.enumerated() {
+                        let location = matchRange.location + i
+                        if char == "[" || char == "]" || char == "(" || char == ")" {
+                            let markerRange = NSRange(location: location, length: 1)
+                            attrs.append((markerRange, [.foregroundColor: ctx.configuration.theme.mutedText]))
+                        } else {
+                            let contentRange = NSRange(location: location, length: 1)
+                            attrs.append((contentRange, [.foregroundColor: ctx.configuration.theme.incompleteLink.withAlphaComponent(ctx.configuration.link.incompleteLinkAlpha)]))
+                        }
                     }
                 }
             }
@@ -369,7 +387,8 @@ extension MarkdownStyler {
 
     static func shrinkInactiveMarkers(_ ctx: StylingContext) -> [StyledRange] {
         var attrs: [StyledRange] = []
-        for (i, token) in ctx.tokens.enumerated() where !ctx.activeTokenIndices.contains(i) {
+        for (i, token) in ctx.tokens.enumerated()
+        where !ctx.activeTokenIndices.contains(i) && ctx.isInScope(token.range) {
             if token.kind == .codeBlock || token.kind == .inlineCode || token.kind == .inlineLatex || token.kind == .imageEmbed {
                 continue
             }

@@ -131,14 +131,6 @@ extension NativeTextView {
 
     /// Force TextKit 2 to lay out all fragments within the current visible rect.
     func ensureVisibleLayout() {
-        guard let tlm = textLayoutManager else { return }
-        let visTop = visibleRect.minY
-        let visBot = visibleRect.maxY
-        tlm.enumerateTextLayoutFragments(from: tlm.documentRange.location, options: [.ensuresLayout]) { fragment in
-            let fr = fragment.layoutFragmentFrame
-            if fr.maxY < visTop { return true }
-            if fr.minY > visBot { return false }
-            return true
-        }
+        textLayoutManager?.textViewportLayoutController.layoutViewport()
     }
 }

@@ -1,7 +1,15 @@
 import Combine
 import Foundation
 
-struct NoteTab: Identifiable, Codable, Equatable {
+private final class SendableUserDefaults: @unchecked Sendable {
+    let value: UserDefaults
+
+    init(_ value: UserDefaults) {
+        self.value = value
+    }
+}
+
+struct NoteTab: Identifiable, Codable, Equatable, Sendable {
     var id: UUID
     var text: String
     var createdAt: Date
@@ -24,14 +32,14 @@ final class NoteStore: ObservableObject {
     @Published private(set) var tabs: [NoteTab]
     @Published private(set) var activeTabID: UUID
 
-    private static let legacyTextKey = "notchNotes.text"
-    private static let tabsKey = "notchNotes.tabs.v1"
-    private static let archiveDefaultsKey = "notchNotes.archive.v2"
-    private static let activeTabIDKey = "notchNotes.activeTabID"
-    private static let lastSavedAtKey = "notchNotes.lastSavedAt"
-    private static let saveDelay: TimeInterval = 0.18
+    nonisolated private static let legacyTextKey = "notchNotes.text"
+    nonisolated private static let tabsKey = "notchNotes.tabs.v1"
+    nonisolated private static let archiveDefaultsKey = "notchNotes.archive.v2"
+    nonisolated private static let activeTabIDKey = "notchNotes.activeTabID"
+    nonisolated private static let lastSavedAtKey = "notchNotes.lastSavedAt"
+    nonisolated private static let saveDelay: TimeInterval = 0.18
 
-    private struct PersistedNotes: Codable {
+    private struct PersistedNotes: Codable, Sendable {
         let tabs: [NoteTab]
         let activeTabID: UUID
         let savedAt: Date
@@ -45,6 +53,7 @@ final class NoteStore: ObservableObject {
     private let defaults: UserDefaults
     private let archiveURL: URL?
     private let archiveWriter: @Sendable (Data, URL) throws -> Void
+    private let archiveEncoder: @Sendable ([NoteTab], UUID, Date) throws -> Data
     private let persistenceQueue = DispatchQueue(label: "io.github.oiloil.NotchNotes.persistence")
     private var pendingSave: DispatchWorkItem?
     private var recentlyDeletedNote: DeletedNote?
@@ -52,11 +61,13 @@ final class NoteStore: ObservableObject {
     init(
         defaults: UserDefaults = .standard,
         archiveURL: URL? = NoteStore.defaultArchiveURL(),
-        archiveWriter: @escaping @Sendable (Data, URL) throws -> Void = NoteStore.writeArchive
+        archiveWriter: @escaping @Sendable (Data, URL) throws -> Void = NoteStore.writeArchive,
+        archiveEncoder: @escaping @Sendable ([NoteTab], UUID, Date) throws -> Data = NoteStore.encodeArchive
     ) {
         self.defaults = defaults
         self.archiveURL = archiveURL
         self.archiveWriter = archiveWriter
+        self.archiveEncoder = archiveEncoder
 
         let snapshot = Self.loadLatestSnapshot(defaults: defaults, archiveURL: archiveURL)
         let storedTabs = snapshot?.tabs ?? []
@@ -193,11 +204,21 @@ final class NoteStore: ObservableObject {
         pendingSave = nil
         do {
             guard let archiveURL else { throw NoteTitleError.saveFailed }
-            let snapshot = PersistedNotes(tabs: candidate, activeTabID: activeTabID, savedAt: savedAt)
-            let data = try JSONEncoder().encode(snapshot)
+            let encoder = archiveEncoder
+            let activeID = activeTabID
+            let activeText = candidate[index].text
             // 旧快照先完成，候选落盘后才发布。writer 不得同步回主线程。
-            try persistenceQueue.sync { try archiveWriter(data, archiveURL) }
-            persistRecoveryCopy(data, savedAt: savedAt)
+            try persistenceQueue.sync {
+                let data = try encoder(candidate, activeID, savedAt)
+                try archiveWriter(data, archiveURL)
+                Self.persistRecoveryCopy(
+                    data,
+                    savedAt: savedAt,
+                    activeTabID: activeID,
+                    activeText: activeText,
+                    defaults: defaults
+                )
+            }
             tabs = candidate
         } catch {
             if needsBodySave { scheduleSave() }
@@ -208,6 +229,10 @@ final class NoteStore: ObservableObject {
     nonisolated static func writeArchive(_ data: Data, _ url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
+    }
+
+    nonisolated static func encodeArchive(_ tabs: [NoteTab], _ activeTabID: UUID, _ savedAt: Date) throws -> Data {
+        try JSONEncoder().encode(PersistedNotes(tabs: tabs, activeTabID: activeTabID, savedAt: savedAt))
     }
 
     var canRestoreDeletedNote: Bool {
@@ -254,26 +279,42 @@ final class NoteStore: ObservableObject {
 
     private func persistNow() {
         let savedAt = Date()
-        let snapshot = PersistedNotes(tabs: tabs, activeTabID: activeTabID, savedAt: savedAt)
-
-        guard let archiveData = try? JSONEncoder().encode(snapshot) else { return }
-        persistRecoveryCopy(archiveData, savedAt: savedAt)
-
-        guard let archiveURL else { return }
+        let snapshotTabs = tabs
+        let snapshotActiveID = activeTabID
+        let snapshotActiveText = text
+        let defaults = SendableUserDefaults(defaults)
+        let archiveURL = archiveURL
         let writer = archiveWriter
+        let encoder = archiveEncoder
         persistenceQueue.async {
             do {
-                try writer(archiveData, archiveURL)
+                let archiveData = try encoder(snapshotTabs, snapshotActiveID, savedAt)
+                Self.persistRecoveryCopy(
+                    archiveData,
+                    savedAt: savedAt,
+                    activeTabID: snapshotActiveID,
+                    activeText: snapshotActiveText,
+                    defaults: defaults.value
+                )
+                if let archiveURL {
+                    try writer(archiveData, archiveURL)
+                }
             } catch {
                 // UserDefaults remains the compatible recovery copy.
             }
         }
     }
 
-    private func persistRecoveryCopy(_ data: Data, savedAt: Date) {
+    nonisolated private static func persistRecoveryCopy(
+        _ data: Data,
+        savedAt: Date,
+        activeTabID: UUID,
+        activeText: String,
+        defaults: UserDefaults
+    ) {
         defaults.set(data, forKey: Self.archiveDefaultsKey)
         defaults.set(activeTabID.uuidString, forKey: Self.activeTabIDKey)
-        defaults.set(text, forKey: Self.legacyTextKey)
+        defaults.set(activeText, forKey: Self.legacyTextKey)
         defaults.set(savedAt, forKey: Self.lastSavedAtKey)
     }
 

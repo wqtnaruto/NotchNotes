@@ -47,6 +47,7 @@ struct MarkdownLists {
         baseFont: NSFont,
         nsText: NSString,
         fullRange: NSRange,
+        scanRanges: [NSRange]? = nil,
         listsEnabled: Bool,
         defaultLineHeight: CGFloat,
         defaultParagraphSpacing: CGFloat,
@@ -58,6 +59,7 @@ struct MarkdownLists {
         let indentPerLevel = configuration.lists.indentPerLevel
         let extraLineHeight = configuration.lists.extraLineHeight
         let spaceWidth = (" " as NSString).size(withAttributes: [.font: baseFont]).width
+        let ranges = scanRanges ?? [fullRange]
 
         func applyListMatches(_ matches: [NSTextCheckingResult]) {
             for match in matches {
@@ -94,13 +96,17 @@ struct MarkdownLists {
         // Ordered lists
         let orderedListPattern = #"^([ \t]*)(\d+\.(?:[ \t]+\[[ xX]\])?[ \t]+)(.*)$"#
         if let orderedListRegex = try? NSRegularExpression(pattern: orderedListPattern, options: [.anchorsMatchLines]) {
-            applyListMatches(orderedListRegex.matches(in: text, options: [], range: fullRange))
+            for range in ranges {
+                applyListMatches(orderedListRegex.matches(in: text, options: [], range: range))
+            }
         }
 
         // Bullet lists
         let bulletListPattern = #"^([ \t]*)([-•](?:[ \t]+\[[ xX]\])?[ \t]+)(.*)$"#
         if let bulletListRegex = try? NSRegularExpression(pattern: bulletListPattern, options: [.anchorsMatchLines]) {
-            applyListMatches(bulletListRegex.matches(in: text, options: [], range: fullRange))
+            for range in ranges {
+                applyListMatches(bulletListRegex.matches(in: text, options: [], range: range))
+            }
         }
         return attributesList
     }

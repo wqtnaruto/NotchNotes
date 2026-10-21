@@ -14,6 +14,10 @@ import AppKit
 
 extension NativeTextViewCoordinator {
     func updateCodeBlockSelection(textView: NSTextView, tokens: [MarkdownToken]? = nil) {
+        guard onCodeBlockSelectionChange != nil else {
+            cachedCodeBlockTokens.removeAll(keepingCapacity: true)
+            return
+        }
         guard let textContainer = textView.textContainer else {
             onCodeBlockSelectionChange?([])
             return

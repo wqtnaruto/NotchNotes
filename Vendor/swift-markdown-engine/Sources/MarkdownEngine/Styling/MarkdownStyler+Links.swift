@@ -43,7 +43,8 @@ extension MarkdownStyler {
 
     static func styleWikiLinks(_ ctx: StylingContext, wikiLinkIDProvider: (NSRange) -> String?) -> [StyledRange] {
         var attrs: [StyledRange] = []
-        for (index, token) in ctx.tokens.enumerated() where token.kind == .wikiLink {
+        for (index, token) in ctx.tokens.enumerated()
+        where token.kind == .wikiLink && ctx.isInScope(token.range) {
             if MarkdownDetection.isInsideCodeBlock(range: token.range, codeTokens: ctx.codeTokens) { continue }
             attrs.append((token.range, [NSAttributedString.Key.spellingState: 0]))
             let nodeName = ctx.nsText.substring(with: token.contentRange)
@@ -82,7 +83,8 @@ extension MarkdownStyler {
 
     static func styleMarkdownLinks(_ ctx: StylingContext) -> [StyledRange] {
         var attrs: [StyledRange] = []
-        for (idx, token) in ctx.tokens.enumerated() where token.kind == .link {
+        for (idx, token) in ctx.tokens.enumerated()
+        where token.kind == .link && ctx.isInScope(token.range) {
             if MarkdownDetection.isInsideCodeBlock(range: token.range, codeTokens: ctx.codeTokens) { continue }
             attrs.append((token.range, [NSAttributedString.Key.spellingState: 0]))
             let fullMatch = ctx.nsText.substring(with: token.range)

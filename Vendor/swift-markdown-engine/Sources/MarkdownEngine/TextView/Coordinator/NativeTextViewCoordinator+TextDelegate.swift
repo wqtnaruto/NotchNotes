@@ -112,7 +112,6 @@ extension NativeTextViewCoordinator {
         let tokens = parsed.tokens
         let codeTokens = parsed.codeTokens
         let latexTokens = parsed.latexTokens
-        let blockLatexTokens = parsed.blockLatexTokens
         let preEditActiveTokenIndices = pendingPreEditActiveTokenIndices ?? previousActiveTokenIndices
         pendingPreEditActiveTokenIndices = nil
 
@@ -134,9 +133,6 @@ extension NativeTextViewCoordinator {
         if codeBlockStructureChanged {
             effectiveParagraphCandidates = [NSRange(location: 0, length: fullText.length)]
         }
-        // Always restyle paragraphs containing latex/imageEmbed tokens to avoid stale raw text.
-        let latexParagraphs = (latexTokens + blockLatexTokens + parsed.imageEmbedTokens).map { fullText.paragraphRange(for: $0.range) }
-        effectiveParagraphCandidates.append(contentsOf: latexParagraphs)
         effectiveParagraphCandidates.append(contentsOf: tokenRestyleParagraphs(
             in: fullText,
             tokens: tokens,
@@ -179,7 +175,6 @@ extension NativeTextViewCoordinator {
         let tokens = parsed.tokens
         let codeTokens = parsed.codeTokens
         let latexTokens = parsed.latexTokens
-        let blockLatexTokens = parsed.blockLatexTokens
         let nsText = tv.string as NSString
 
         let prevActive = activeTokenIndices
@@ -204,9 +199,6 @@ extension NativeTextViewCoordinator {
             let prevPara = nsText.paragraphRange(for: NSRange(location: safePrev, length: 0))
             paragraphCandidates.append(prevPara)
         }
-        // Also restyle paragraphs containing latex/imageEmbed tokens to refresh rendering.
-        let latexParagraphs = (latexTokens + blockLatexTokens + parsed.imageEmbedTokens).map { nsText.paragraphRange(for: $0.range) }
-        paragraphCandidates.append(contentsOf: latexParagraphs)
         paragraphCandidates.append(contentsOf: tokenRestyleParagraphs(
             in: nsText,
             tokens: tokens,

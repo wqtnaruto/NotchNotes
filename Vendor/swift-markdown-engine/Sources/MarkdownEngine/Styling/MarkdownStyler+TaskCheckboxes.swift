@@ -16,7 +16,9 @@ extension MarkdownStyler {
 
     static func styleTaskCheckboxes(_ ctx: StylingContext) -> [StyledRange] {
         var attrs: [StyledRange] = []
-        let taskMatches = MarkdownStyler.taskListRegex.matches(in: ctx.text, options: [], range: ctx.fullRange)
+        let taskMatches = ctx.scanRanges.flatMap {
+            MarkdownStyler.taskListRegex.matches(in: ctx.text, options: [], range: $0)
+        }
         for match in taskMatches {
             let markerRange = match.range(at: 2)
             let spacerRange = match.range(at: 3)

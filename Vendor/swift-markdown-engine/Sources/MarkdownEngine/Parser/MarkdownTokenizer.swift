@@ -70,12 +70,13 @@ enum MarkdownTokenizer {
                                         markerRanges: [openMarker, closeMarker]))
             imageEmbedRanges.append(full)
         }
+        let imageEmbedIndex = MarkdownRangeIndex(ranges: imageEmbedRanges)
 
         // Node links [[Name]]
         for match in wikiLinkRegex.matches(in: text, options: [], range: fullRange) {
             let full = match.range(at: 0)
             // Skip ranges already claimed by imageEmbed tokens
-            let overlapsImage = imageEmbedRanges.contains { NSIntersectionRange($0, full).length > 0 }
+            let overlapsImage = imageEmbedIndex.intersects(full)
             if overlapsImage { continue }
             let content = match.range(at: 1)
             let open = NSRange(location: full.location, length: 2)
@@ -139,11 +140,14 @@ enum MarkdownTokenizer {
                                         contentRange: contentRange,
                                         markerRanges: [openingMarker, closingMarker]))
         }
+        let codeBlockIndex = MarkdownRangeIndex(
+            ranges: tokens.lazy.filter { $0.kind == .codeBlock }.map(\.range)
+        )
         
         // Block LaTeX $$...$$ (multiline)
         for match in blockLatexRegex.matches(in: text, options: [], range: fullRange) {
             let full = match.range(at: 0)
-            let inCode = tokens.contains { $0.kind == .codeBlock && NSIntersectionRange($0.range, full).length > 0 }
+            let inCode = codeBlockIndex.intersects(full)
             if inCode { continue }
             
             let content = match.range(at: 1)
@@ -166,15 +170,17 @@ enum MarkdownTokenizer {
                                         contentRange: content,
                                         markerRanges: [openBacktick, closeBacktick]))
         }
+        let excludedInlineLatexIndex = MarkdownRangeIndex(
+            ranges: tokens.lazy
+                .filter { $0.kind == .codeBlock || $0.kind == .blockLatex }
+                .map(\.range)
+        )
 
         // Inline LaTeX $formula$
         for match in inlineLatexRegex.matches(in: text, options: [], range: fullRange) {
             let full = match.range(at: 0)
             let content = match.range(at: 1)
-            let isInsideBlock = tokens.contains {
-                ($0.kind == .codeBlock || $0.kind == .blockLatex) &&
-                NSIntersectionRange($0.range, full).length > 0
-            }
+            let isInsideBlock = excludedInlineLatexIndex.intersects(full)
             if isInsideBlock { continue }
             let contentString = nsText.substring(with: content)
             if !isInlineMathContent(contentString) { continue }

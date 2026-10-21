@@ -76,12 +76,10 @@ extension NativeTextViewCoordinator {
             theme: configuration.theme
         )
 
-        if let tlm = textView.textLayoutManager {
-            if invalidateLayout {
-                tlm.invalidateLayout(for: tlm.documentRange)
-            }
-            tlm.ensureLayout(for: tlm.documentRange)
+        if invalidateLayout, let tlm = textView.textLayoutManager {
+            tlm.invalidateLayout(for: tlm.documentRange)
         }
+        (textView as? NativeTextView)?.ensureVisibleLayout()
     }
 
     func restyleTextView(

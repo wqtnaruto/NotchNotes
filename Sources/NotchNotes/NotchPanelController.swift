@@ -574,10 +574,6 @@ final class NotchPanelController: NSObject {
     }
 
     private func handleMouseLocation(_ point: NSPoint) {
-        // 拖拽结束后剪贴板可能保留文件；下一次普通按下不能复用旧拖拽。
-        if NSEvent.pressedMouseButtons & 1 == 0 {
-            completedDragChangeCount = NSPasteboard(name: .drag).changeCount
-        }
         if !isExpanded, isFileDrag(at: point) {
             let layout = currentLayout()
             hotPanel.setFrame(fileDropFrame(for: layout), display: true)
@@ -742,6 +738,7 @@ final class NotchPanelController: NSObject {
     func flush() {
         settingsStore.stopKeepingAwake()
         store.flush(waitForDisk: true)
+        imageStore.flush()
     }
 
     private func activateEditor() {
@@ -789,12 +786,24 @@ final class NotchPanelController: NSObject {
     }
 
     private func isFileDrag(at point: NSPoint) -> Bool {
+        let isPressed = NSEvent.pressedMouseButtons & 1 != 0
+        guard !isExpanded, isPressed else { return false }
+
         let pasteboard = NSPasteboard(name: .drag)
+        let changeCount = pasteboard.changeCount
+        guard NotchActivationPolicy.shouldInspectFileDrag(
+            isExpanded: isExpanded,
+            isLeftMousePressed: isPressed,
+            pasteboardChanged: changeCount != completedDragChangeCount
+        ) else {
+            return false
+        }
+
         return NotchActivationPolicy.shouldRevealForFileDrag(
             at: point, in: fileDropFrame(for: currentLayout()),
-            isLeftMousePressed: NSEvent.pressedMouseButtons & 1 != 0,
+            isLeftMousePressed: isPressed,
             containsFileURLs: FileDropPasteboardReader.containsFileURLs(pasteboard),
-            pasteboardChangeCount: pasteboard.changeCount,
+            pasteboardChangeCount: changeCount,
             completedDragChangeCount: completedDragChangeCount
         )
     }

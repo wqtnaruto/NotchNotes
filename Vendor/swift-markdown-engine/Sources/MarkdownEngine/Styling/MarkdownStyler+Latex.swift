@@ -16,7 +16,9 @@ extension MarkdownStyler {
 
     static func styleBlockLatex(_ ctx: StylingContext) -> [StyledRange] {
         var attrs: [StyledRange] = []
-        let blockLatexTokens = ctx.tokens.enumerated().filter { $0.element.kind == .blockLatex }
+        let blockLatexTokens = ctx.tokens.enumerated().filter {
+            $0.element.kind == .blockLatex && ctx.isInScope($0.element.range)
+        }
         for (idx, token) in blockLatexTokens {
             if MarkdownDetection.isInsideCodeBlock(range: token.range, codeTokens: ctx.codeTokens) { continue }
             let isActive = ctx.activeTokenIndices.contains(idx)
@@ -61,7 +63,8 @@ extension MarkdownStyler {
 
     static func styleInlineLatex(_ ctx: StylingContext) -> [StyledRange] {
         var attrs: [StyledRange] = []
-        for (idx, token) in ctx.tokens.enumerated() where token.kind == .inlineLatex {
+        for (idx, token) in ctx.tokens.enumerated()
+        where token.kind == .inlineLatex && ctx.isInScope(token.range) {
             if MarkdownDetection.isInsideCodeBlock(range: token.range, codeTokens: ctx.codeTokens) { continue }
 
             attrs.append((token.range, [NSAttributedString.Key.spellingState: 0]))

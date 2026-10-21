@@ -174,9 +174,8 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         textView.layoutBridge = bridge
 
         scrollView.documentView = textView
-        // Force full-document layout at init so paragraph heights are known
-        // upfront; otherwise TextKit 2 viewport layout causes scroll drift.
-        textLayoutManager.ensureLayout(for: textLayoutManager.documentRange)
+        // TextKit 2 保持视口惰性布局；全文布局会让大文档首次展开阻塞主线程。
+        textView.ensureVisibleLayout()
 
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: -scrollView.contentInsets.top))
         scrollView.clampToInsets()

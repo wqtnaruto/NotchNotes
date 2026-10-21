@@ -67,6 +67,21 @@ final class NotchActivationPolicyTests: XCTestCase {
         XCTAssertFalse(shouldReveal(NSPoint(x: 599, y: 930)))
     }
 
+    func testFileDragInspectionOnlyRunsDuringANewPressedDrag() {
+        XCTAssertFalse(NotchActivationPolicy.shouldInspectFileDrag(
+            isExpanded: true, isLeftMousePressed: true, pasteboardChanged: true
+        ))
+        XCTAssertFalse(NotchActivationPolicy.shouldInspectFileDrag(
+            isExpanded: false, isLeftMousePressed: false, pasteboardChanged: true
+        ))
+        XCTAssertFalse(NotchActivationPolicy.shouldInspectFileDrag(
+            isExpanded: false, isLeftMousePressed: true, pasteboardChanged: false
+        ))
+        XCTAssertTrue(NotchActivationPolicy.shouldInspectFileDrag(
+            isExpanded: false, isLeftMousePressed: true, pasteboardChanged: true
+        ))
+    }
+
     private func mouseEvent(at point: NSPoint, windowNumber: Int = 0) throws -> NSEvent {
         try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
                                         timestamp: 0, windowNumber: windowNumber, context: nil,

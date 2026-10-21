@@ -1,6 +1,14 @@
 import AppKit
 
 enum NotchActivationPolicy {
+    static func shouldInspectFileDrag(
+        isExpanded: Bool,
+        isLeftMousePressed: Bool,
+        pasteboardChanged: Bool
+    ) -> Bool {
+        !isExpanded && isLeftMousePressed && pasteboardChanged
+    }
+
     static func shouldRevealForFileDrag(
         at location: NSPoint,
         in dropFrame: NSRect,

@@ -286,6 +286,29 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertNil(store.tabs[0].customTitle)
     }
 
+    func testNonBlockingFlushMovesSnapshotEncodingOffMainThread() throws {
+        let env = try makeEnvironment()
+        defer { env.cleanUp() }
+        let encoder = BlockingArchiveEncoder()
+        let store = NoteStore(
+            defaults: env.defaults,
+            archiveURL: env.archiveURL,
+            archiveEncoder: encoder.encode
+        )
+        store.flush()
+        encoder.shouldBlock = true
+        store.updateText("后台编码")
+
+        let start = ContinuousClock.now
+        store.flush(waitForDisk: false)
+        let elapsed = ContinuousClock.now - start
+
+        XCTAssertLessThan(elapsed, .milliseconds(50))
+        XCTAssertTrue(encoder.waitUntilStarted(timeout: 1))
+        encoder.release()
+        store.flush()
+    }
+
     func testOldArchivesWithoutTitleKeyRemainCompatible() throws {
         for source in ["file", "archive", "tabs", "legacy"] {
             let env = try makeEnvironment()
@@ -357,6 +380,43 @@ final class TitleArchiveWriter: @unchecked Sendable {
         if duration > 0 { Thread.sleep(forTimeInterval: duration) }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
+    }
+}
+
+final class BlockingArchiveEncoder: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var blocking = false
+    private var started = false
+
+    var shouldBlock: Bool {
+        get { condition.withLock { blocking } }
+        set { condition.withLock { blocking = newValue } }
+    }
+
+    func encode(_ tabs: [NoteTab], _ activeTabID: UUID, _ savedAt: Date) throws -> Data {
+        condition.lock()
+        if blocking {
+            started = true
+            condition.broadcast()
+            while blocking { condition.wait() }
+        }
+        condition.unlock()
+        return try JSONEncoder().encode(tabs)
+    }
+
+    func waitUntilStarted(timeout: TimeInterval) -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date().addingTimeInterval(timeout)
+        while !started && condition.wait(until: deadline) {}
+        return started
+    }
+
+    func release() {
+        condition.withLock {
+            blocking = false
+            condition.broadcast()
+        }
     }
 }
 

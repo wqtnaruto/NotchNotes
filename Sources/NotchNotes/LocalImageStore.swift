@@ -3,7 +3,9 @@ import Foundation
 import MarkdownEngine
 
 final class LocalImageStore: EmbeddedImageFileProvider, @unchecked Sendable {
-    private struct ImageAssetRecord: Codable {
+    static let contentDidChangeNotification = Notification.Name("NotchNotes.LocalImageStore.contentDidChange")
+
+    private struct ImageAssetRecord: Codable, Sendable {
         var id: String
         var displayName: String
         var storedFilename: String
@@ -15,51 +17,71 @@ final class LocalImageStore: EmbeddedImageFileProvider, @unchecked Sendable {
     private let directoryURL: URL
     private let manifestURL: URL
     private let lock = NSLock()
+    private let ioQueue = DispatchQueue(label: "io.github.oiloil.NotchNotes.images", qos: .utility)
+    private let dataWriter: @Sendable (Data, URL) throws -> Void
     private var records: [String: ImageAssetRecord]
+    private var cachedImages: [String: NSImage] = [:]
+    private var loadingImageIDs: Set<String> = []
     private var version = 0
     private let imageExtension = "png"
 
-    init() {
+    convenience init() {
         let supportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        directoryURL = supportURL.appendingPathComponent("NotchNotes/Images", isDirectory: true)
+        self.init(directoryURL: supportURL.appendingPathComponent("NotchNotes/Images", isDirectory: true))
+    }
+
+    init(
+        directoryURL: URL,
+        dataWriter: @escaping @Sendable (Data, URL) throws -> Void = LocalImageStore.writeData
+    ) {
+        self.directoryURL = directoryURL
         try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         manifestURL = directoryURL.appendingPathComponent("manifest.json")
+        self.dataWriter = dataWriter
         records = Self.loadRecords(from: manifestURL)
     }
 
     func saveImage(from pasteboard: NSPasteboard) -> String? {
         if let fileURL = PasteboardImageReader.imageFileURL(from: pasteboard),
-           let data = try? Data(contentsOf: fileURL),
-           NSImage(data: data) != nil {
-            return save(
-                data: pngData(fromImageData: data) ?? data,
+           fileURL.isFileURL {
+            return enqueueSave(
                 originalName: fileURL.deletingPathExtension().lastPathComponent,
                 originalFileURL: fileURL,
                 sourceKind: "file"
-            )
+            ) {
+                guard let data = try? Data(contentsOf: fileURL), NSImage(data: data) != nil else { return nil }
+                return self.pngData(fromImageData: data) ?? data
+            }
         }
 
-        guard let pngData = PasteboardImageReader.imageData(from: pasteboard) else {
+        if let pngData = pasteboard.data(forType: .png), !pngData.isEmpty {
+            return enqueueSave(
+                originalName: "pasted-image",
+                originalFileURL: nil,
+                sourceKind: "clipboardImage"
+            ) {
+                pngData
+            }
+        }
+
+        guard let imageData = PasteboardImageReader.imageData(from: pasteboard) else {
             return nil
         }
 
-        return save(
-            data: pngData,
+        return enqueueSave(
             originalName: "pasted-image",
             originalFileURL: nil,
             sourceKind: "clipboardImage"
-        )
+        ) { imageData }
     }
 
     func image(for reference: EmbeddedImageRequest) -> NSImage? {
         let candidateNames = [reference.id, reference.name].compactMap { $0 }
 
         for candidateName in candidateNames {
-            let url = imageURL(for: candidateName)
-            if let image = NSImage(contentsOf: url) {
-                return image
-            }
+            if let image = cachedImage(for: candidateName) { return image }
+            scheduleImageLoadIfNeeded(for: candidateName)
         }
 
         return nil
@@ -103,31 +125,81 @@ final class LocalImageStore: EmbeddedImageFileProvider, @unchecked Sendable {
         return version
     }
 
-    private func save(data: Data, originalName: String, originalFileURL: URL?, sourceKind: String) -> String? {
+    func flush() {
+        ioQueue.sync {}
+    }
+
+    private func enqueueSave(
+        originalName: String,
+        originalFileURL: URL?,
+        sourceKind: String,
+        loadData: @escaping @Sendable () -> Data?
+    ) -> String {
         let displayName = sanitizedDisplayName(originalName)
         let id = UUID()
         let storedFilename = "\(id.uuidString).\(imageExtension)"
         let url = imageURL(for: id.uuidString)
+        let record = ImageAssetRecord(
+            id: id.uuidString,
+            displayName: displayName,
+            storedFilename: storedFilename,
+            originalPath: originalFileURL?.path,
+            sourceKind: sourceKind,
+            createdAt: Date()
+        )
+        lock.withLock { records[id.uuidString] = record }
+        let writer = dataWriter
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            guard let data = loadData() else {
+                self.lock.withLock { self.records[id.uuidString] = nil }
+                return
+            }
+            do {
+                try writer(data, url)
+                let image = NSImage(data: data)
+                let recordsToSave = self.lock.withLock { () -> [String: ImageAssetRecord] in
+                    if let image { self.cachedImages[id.uuidString] = image }
+                    self.version += 1
+                    return self.records
+                }
+                self.saveRecords(recordsToSave)
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: Self.contentDidChangeNotification, object: self)
+                }
+            } catch {
+                self.lock.withLock { self.records[id.uuidString] = nil }
+            }
+        }
+        return "![[\(displayName)|\(id.uuidString)]]"
+    }
 
-        do {
-            try data.write(to: url, options: .atomic)
-            let record = ImageAssetRecord(
-                id: id.uuidString,
-                displayName: displayName,
-                storedFilename: storedFilename,
-                originalPath: originalFileURL?.path,
-                sourceKind: sourceKind,
-                createdAt: Date()
-            )
-            lock.lock()
-            records[id.uuidString] = record
-            let recordsToSave = records
-            version += 1
-            lock.unlock()
-            saveRecords(recordsToSave)
-            return "![[\(displayName)|\(id.uuidString)]]"
-        } catch {
-            return nil
+    private func cachedImage(for id: String) -> NSImage? {
+        lock.withLock { cachedImages[id] }
+    }
+
+    private func scheduleImageLoadIfNeeded(for candidateName: String) {
+        let load: (String, URL)? = lock.withLock {
+            let id = records[candidateName]?.id ?? candidateName
+            guard cachedImages[id] == nil, loadingImageIDs.insert(id).inserted else { return nil }
+            let filename = records[candidateName]?.storedFilename ?? "\(candidateName).\(imageExtension)"
+            return (id, directoryURL.appendingPathComponent(filename))
+        }
+        guard let (id, url) = load else { return }
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            let image = NSImage(contentsOf: url)
+            self.lock.withLock {
+                self.loadingImageIDs.remove(id)
+                if let image {
+                    self.cachedImages[id] = image
+                    self.version += 1
+                }
+            }
+            guard image != nil else { return }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: Self.contentDidChangeNotification, object: self)
+            }
         }
     }
 
@@ -175,6 +247,10 @@ final class LocalImageStore: EmbeddedImageFileProvider, @unchecked Sendable {
     private func saveRecords(_ records: [String: ImageAssetRecord]) {
         let sortedRecords = records.values.sorted { $0.createdAt < $1.createdAt }
         guard let data = try? JSONEncoder().encode(sortedRecords) else { return }
-        try? data.write(to: manifestURL, options: .atomic)
+        try? dataWriter(data, manifestURL)
+    }
+
+    nonisolated private static func writeData(_ data: Data, _ url: URL) throws {
+        try data.write(to: url, options: .atomic)
     }
 }

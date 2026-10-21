@@ -635,7 +635,10 @@ struct MarkdownNoteEditor: View {
             strikethroughColor: NSColor(white: 0.62, alpha: 1)
         )
 
-        let services = MarkdownEditorServices(images: imageStore)
+        let services = MarkdownEditorServices(
+            images: imageStore,
+            bus: MarkdownEditorBus(renderInvalidationRequest: LocalImageStore.contentDidChangeNotification)
+        )
 
         return MarkdownEditorConfiguration(
             theme: theme,

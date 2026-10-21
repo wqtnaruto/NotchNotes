@@ -16,7 +16,8 @@ extension MarkdownStyler {
 
     static func styleCodeBlocks(_ ctx: StylingContext) -> [StyledRange] {
         var attrs: [StyledRange] = []
-        for (idx, token) in ctx.tokens.enumerated() where token.kind == .codeBlock {
+        for (idx, token) in ctx.tokens.enumerated()
+        where token.kind == .codeBlock && ctx.isInScope(token.range) {
             let codeContent = ctx.nsText.substring(with: token.contentRange)
             let isActive = ctx.activeTokenIndices.contains(idx)
             let language = MarkdownTokenizer.extractLanguage(from: token, in: ctx.text)
@@ -46,7 +47,8 @@ extension MarkdownStyler {
 
     static func styleInlineCode(_ ctx: StylingContext) -> [StyledRange] {
         var attrs: [StyledRange] = []
-        for (idx, token) in ctx.tokens.enumerated() where token.kind == .inlineCode {
+        for (idx, token) in ctx.tokens.enumerated()
+        where token.kind == .inlineCode && ctx.isInScope(token.range) {
             let isActive = ctx.activeTokenIndices.contains(idx)
             attrs.append((token.contentRange, [
                 .font: ctx.codeFont,
