@@ -508,6 +508,10 @@ final class NotchPanelController: NSObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.updateReminderVisibility() }
             .store(in: &reminderCancellables)
+        settingsStore.sedentaryReminder.$showsPendant
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateReminderVisibility() }
+            .store(in: &reminderCancellables)
         settingsStore.$language
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -894,7 +898,7 @@ final class NotchPanelController: NSObject {
 
     private func updateReminderVisibility() {
         guard !isExpanded, !isRevealedForFileDrag,
-              settingsStore.sedentaryReminder.shouldDisplayWidget else {
+              settingsStore.sedentaryReminder.shouldDisplayPendant else {
             reminderPanel.orderOut(nil)
             return
         }

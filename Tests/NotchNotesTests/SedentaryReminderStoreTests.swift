@@ -12,7 +12,8 @@ final class SedentaryReminderStoreTests: XCTestCase {
             XCTAssertEqual(store.phase, .disabled)
             XCTAssertEqual(store.interval, .fortyFive)
             XCTAssertEqual(store.activityDuration, .two)
-            XCTAssertFalse(store.shouldDisplayWidget)
+            XCTAssertFalse(store.showsPendant)
+            XCTAssertFalse(store.shouldDisplayPendant)
         }
     }
 
@@ -43,7 +44,7 @@ final class SedentaryReminderStoreTests: XCTestCase {
 
             XCTAssertEqual(store.phase, .countingDown)
             XCTAssertEqual(store.remainingSeconds, 1_800)
-            XCTAssertTrue(store.shouldDisplayWidget)
+            XCTAssertFalse(store.shouldDisplayPendant)
 
             let restored = SedentaryReminderStore(
                 defaults: defaults,
@@ -53,6 +54,58 @@ final class SedentaryReminderStoreTests: XCTestCase {
             XCTAssertTrue(restored.isEnabled)
             XCTAssertEqual(restored.interval, .thirty)
             XCTAssertEqual(restored.activityDuration, .five)
+        }
+    }
+
+    func testPendantVisibilityDefaultsToHiddenAndPersists() throws {
+        try withIsolatedSettings { defaults in
+            let store = SedentaryReminderStore(defaults: defaults, automaticallyTicks: false)
+            store.setEnabled(true)
+
+            XCTAssertFalse(store.showsPendant)
+            XCTAssertFalse(store.shouldDisplayPendant)
+
+            store.showsPendant = true
+            XCTAssertTrue(store.shouldDisplayPendant)
+
+            let restored = SedentaryReminderStore(defaults: defaults, automaticallyTicks: false)
+            XCTAssertTrue(restored.showsPendant)
+            XCTAssertTrue(restored.shouldDisplayPendant)
+        }
+    }
+
+    func testHiddenPendantStillAppearsWhenReminderIsDue() throws {
+        try withIsolatedSettings { defaults in
+            var uptime = 0.0
+            let store = SedentaryReminderStore(
+                defaults: defaults,
+                now: { uptime },
+                automaticallyTicks: false
+            )
+            store.setEnabled(true)
+            XCTAssertFalse(store.shouldDisplayPendant)
+
+            uptime = TimeInterval(store.interval.seconds)
+            store.tick()
+
+            XCTAssertEqual(store.phase, .due)
+            XCTAssertTrue(store.isCardPresented)
+            XCTAssertTrue(store.shouldDisplayPendant)
+
+            store.snooze()
+            XCTAssertFalse(store.shouldDisplayPendant)
+        }
+    }
+
+    func testHiddenPendantDoesNotBlockExplicitCardPresentation() throws {
+        try withIsolatedSettings { defaults in
+            let store = SedentaryReminderStore(defaults: defaults, automaticallyTicks: false)
+            store.setEnabled(true)
+
+            store.presentCard()
+
+            XCTAssertTrue(store.isCardPresented)
+            XCTAssertFalse(store.shouldDisplayPendant)
         }
     }
 
@@ -158,13 +211,13 @@ final class SedentaryReminderStoreTests: XCTestCase {
 
             store.handleScreenUnavailable()
             XCTAssertEqual(store.phase, .waitingForUnlock)
-            XCTAssertFalse(store.shouldDisplayWidget)
+            XCTAssertFalse(store.shouldDisplayPendant)
 
             uptime = 500
             store.handleScreenAvailable()
             XCTAssertEqual(store.phase, .countingDown)
             XCTAssertEqual(store.remainingSeconds, store.interval.seconds)
-            XCTAssertTrue(store.shouldDisplayWidget)
+            XCTAssertFalse(store.shouldDisplayPendant)
         }
     }
 
@@ -269,7 +322,7 @@ final class SedentaryReminderStoreTests: XCTestCase {
 
             XCTAssertFalse(store.isEnabled)
             XCTAssertFalse(store.isPaused)
-            XCTAssertFalse(store.shouldDisplayWidget)
+            XCTAssertFalse(store.shouldDisplayPendant)
             XCTAssertFalse(store.isCardPresented)
             XCTAssertEqual(store.phase, .disabled)
             XCTAssertEqual(store.remainingSeconds, 0)

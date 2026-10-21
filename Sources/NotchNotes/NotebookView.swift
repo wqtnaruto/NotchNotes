@@ -246,6 +246,13 @@ private struct SettingsMenu: View {
                 }
 
                 if reminderStore.isEnabled {
+                    Toggle(isOn: $reminderStore.showsPendant) {
+                        Label(
+                            settingsStore.language.showPendantTitle,
+                            systemImage: reminderStore.showsPendant ? "eye.fill" : "eye.slash"
+                        )
+                    }
+
                     Menu(settingsStore.language.reminderIntervalTitle) {
                         ForEach(SedentaryReminderInterval.allCases) { interval in
                             Button {

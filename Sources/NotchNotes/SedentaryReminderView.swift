@@ -211,6 +211,10 @@ extension AppLanguage {
         self == .chinese ? "鸣人风铃久坐提醒" : "Naruto wind chime break reminder"
     }
 
+    var showPendantTitle: String {
+        self == .chinese ? "展示挂件" : "Show Pendant"
+    }
+
     var reminderIntervalTitle: String {
         self == .chinese ? "提醒间隔" : "Reminder Interval"
     }

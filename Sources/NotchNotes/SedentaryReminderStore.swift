@@ -36,6 +36,9 @@ enum SedentaryReminderPhase: Equatable {
 final class SedentaryReminderStore: ObservableObject {
     @Published private(set) var isEnabled: Bool
     @Published private(set) var isPaused: Bool
+    @Published var showsPendant: Bool {
+        didSet { defaults.set(showsPendant, forKey: Self.showsPendantKey) }
+    }
     @Published var interval: SedentaryReminderInterval {
         didSet { defaults.set(interval.rawValue, forKey: Self.intervalKey) }
     }
@@ -53,6 +56,7 @@ final class SedentaryReminderStore: ObservableObject {
 
     private static let enabledKey = "notchNotes.sedentaryReminder.enabled"
     private static let pausedKey = "notchNotes.sedentaryReminder.paused"
+    private static let showsPendantKey = "notchNotes.sedentaryReminder.showsPendant"
     private static let intervalKey = "notchNotes.sedentaryReminder.intervalMinutes"
     private static let activityDurationKey = "notchNotes.sedentaryReminder.activityMinutes"
 
@@ -86,6 +90,7 @@ final class SedentaryReminderStore: ObservableObject {
         let loadedPaused = loadedEnabled && defaults.bool(forKey: Self.pausedKey)
         isEnabled = loadedEnabled
         isPaused = loadedPaused
+        showsPendant = defaults.bool(forKey: Self.showsPendantKey)
 
         if !loadedEnabled {
             phase = .disabled
@@ -102,8 +107,9 @@ final class SedentaryReminderStore: ObservableObject {
         startTimerIfNeeded()
     }
 
-    var shouldDisplayWidget: Bool {
-        isEnabled && isScreenAvailable
+    var shouldDisplayPendant: Bool {
+        guard isEnabled, isScreenAvailable else { return false }
+        return showsPendant || phase == .due || phase == .completed
     }
 
     func setEnabled(_ enabled: Bool) {
@@ -184,7 +190,7 @@ final class SedentaryReminderStore: ObservableObject {
     }
 
     func presentCard() {
-        guard shouldDisplayWidget else { return }
+        guard isEnabled, isScreenAvailable else { return }
         isCardPresented = true
     }
 
