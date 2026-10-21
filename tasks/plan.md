@@ -1,7 +1,6 @@
 # 分页标题常显与双击重命名实施计划
 
-> 执行约定：用户确认整套方案后，通过 `/b` 逐任务执行；本计划不构成自动实现、提交或发布授权。
-> 状态：待用户确认。任务顺序 T1 → T2 → T3 → T4 → T5，单人串行；每项同时交付该路径的代码和测试。
+> 任务顺序 T1 → T2 → T3 → T4 → T5；每项同时交付对应代码和测试。
 
 **Goal:** 常显分页标题，支持双击原位命名并可靠保存，正文、焦点及原有分页行为不回归。
 
@@ -11,10 +10,10 @@
 
 ## 输入与事实边界
 
-- 规格：[NotchNotes/SPEC.md](../SPEC.md)，从本地 [PRD](../docs/prd/PRD.md) 提取，不创建 Meegle 工作项。
+- 规格：[NotchNotes/SPEC.md](../SPEC.md)，从 [PRD](../docs/prd/PRD.md) 提取。
 - 技术契约：[NotchNotes/docs/design/tab-title-renaming/technical-design.md](../docs/design/tab-title-renaming/technical-design.md)。内部接口、保存顺序、布局参数与事件优先级只在该文档定义，本计划引用而不再维护副本。
 - 选型理由：[NotchNotes/docs/intent/tab-title-renaming.md](../docs/intent/tab-title-renaming.md)（D1–D7）。
-- 当前代码基线：`9321a25`；当前分支 `chore/init-ai-native-workflow`，已有初始化和 PRD 等未跟踪文件。执行前重新检查状态，不把既有产物当成本任务新文件批量提交。
+- 规划代码基线：`9321a25`。
 - 2026-09-24 规划时运行 `swift test --package-path /Users/wuqitian/macbook-island/NotchNotes`：41 个 XCTest、0 失败；这是旧功能基线，新测试尚未创建，原生新交互尚未验收。
 - 本轮未执行打包、GUI 启动、commit、push 或发布。所有下面的命令均是实现阶段的待执行步骤，除上面明确记录的基线测试。
 
@@ -182,4 +181,4 @@ swift build
 
 ## 完成定义与交接
 
-五个任务全部有实现和同层测试，AC 覆盖见技术设计第十一章；所有人工未测项必须明确列出。计划生成者只做一致性自检，不批准计划。用户确认后才进入 `/b`，每次执行下一项，不自动创建工作项或推进远端状态。
+五个任务全部有实现和同层测试，AC 覆盖见技术设计第十一章；所有人工未测项必须明确列出。

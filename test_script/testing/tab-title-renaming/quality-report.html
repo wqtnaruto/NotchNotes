@@ -34,14 +34,14 @@
     <main class="wrap">
       <header>
         <h1>质量报告 — 分页标题常显与双击重命名（T1/T2 验证轮）</h1>
-        <div class="meta">测试上下文：本地需求「分页标题重命名」<code>SPEC.md</code> AC01–AC15 ｜ 被测版本：分支 <code>chore/init-ai-native-workflow</code>（基线 <code>main</code>=<code>9321a25</code>，工作树含 T1/T2 未提交改动）｜ 环境：macOS 26 / Swift 6.4 / Apple LLVM 21 ｜ 报告时间：2026-09-24 17:37 ｜ 负责人：待认领（个人项目，单人串行）</div>
-        <span class="verdict conditional">上线建议：有条件（本轮仅认证 T1/T2 进程内逻辑；整体功能待 T3–T5 与人工验收闭合，且无提交/推送授权）</span>
+        <div class="meta">测试上下文：需求「分页标题重命名」<code>SPEC.md</code> AC01–AC15 ｜ 被测版本：基线 <code>main</code>=<code>9321a25</code>，工作树含 T1/T2 改动 ｜ 环境：macOS 26 / Swift 6.4 / Apple LLVM 21 ｜ 报告时间：2026-09-24 17:37</div>
+        <span class="verdict conditional">上线建议：有条件（本轮仅认证 T1/T2 进程内逻辑；整体功能待 T3–T5 与人工验收闭合）</span>
       </header>
 
       <section>
         <h2>核验总览</h2>
-        <p class="notice">执行引擎适配：本项目初始化时用户选择<strong>不安装 pytest 执行引擎</strong>（<code>AGENTS.md</code> 第 8 行），自动化用例沿用仓库现有 SwiftPM XCTest（<code>Tests/NotchNotesTests/</code>）；本报告由 <code>/t</code> 迭代模式<strong>手工按模板生成</strong>，数字全部来自本轮真实命令输出，非引擎自动渲染。本报告是测试设计、实际执行结果与限制的只读视图，不是审批节点或质量门禁；唯一联动：<code>/mr</code> 会读 2.2 逻辑分支覆盖率作为软卡点。</p>
-        <p class="notice"><code>/t</code> 迭代模式<strong>只跑本次相关用例、不跑全量</strong>；未跑存量按「模块 / 为什么没跑 / 风险」列入 1.4 与排除清单。计数口径：获得终态 = PASS + FAIL + BLOCKED；计划用例（本轮范围）= 获得终态 + NOT RUN；执行率 = 获得终态 ÷ 计划用例。</p>
+        <p class="notice">自动化用例沿用仓库现有 SwiftPM XCTest（<code>Tests/NotchNotesTests/</code>）；报告数字全部来自本轮真实命令输出。本报告记录测试设计、实际执行结果与限制。</p>
+        <p class="notice">本轮只运行相关用例，未跑存量按「模块 / 为什么没跑 / 风险」列入 1.4 与排除清单。计数口径：获得终态 = PASS + FAIL + BLOCKED；计划用例（本轮范围）= 获得终态 + NOT RUN；执行率 = 获得终态 ÷ 计划用例。</p>
         <div class="kpi">
           <div><b>69</b>计划用例(本轮)</div>
           <div><b>69</b>获得终态</div>
@@ -68,7 +68,7 @@
       <section>
         <h2>一、谁测了什么</h2>
         <h3>1.1 AI 已完成的测试</h3>
-        <p class="notice">只写 AI 已实际执行并留有证据的测试；代码分析不写成运行通过。</p>
+        <p class="notice">只记录实际执行并留有证据的测试；代码分析不写成运行通过。</p>
         <table>
           <thead><tr><th>测试项</th><th>用例</th><th>AI 实际做了什么</th><th>结果</th><th>证据</th><th>未解决问题</th></tr></thead>
           <tbody>
@@ -103,7 +103,7 @@
         <table>
           <thead><tr><th>用例/范围</th><th>原验证方式</th><th>实际验证方式</th><th>证据等级</th><th>人工裁决/依据</th><th>影响</th></tr></thead>
           <tbody>
-            <tr><td>全量执行引擎</td><td><code>/t</code> 默认 Python/pytest <code>run.py</code> 渲染报告</td><td>沿用 SwiftPM XCTest + <code>llvm-cov</code> 手工采集，报告手工生成</td><td>间接（真实命令输出，非引擎产物）</td><td>用户初始化选择不装 pytest 引擎（<code>AGENTS.md</code> 第 8 行）</td><td>报告缺失不阻塞主流程；数字仍来自真实执行</td></tr>
+            <tr><td>自动化报告</td><td>由测试命令和覆盖率工具生成证据</td><td>沿用 SwiftPM XCTest + <code>llvm-cov</code> 采集，报告手工整理</td><td>间接（真实命令输出）</td><td>项目未接入独立的 pytest 报告引擎</td><td>数字仍来自真实执行</td></tr>
             <tr><td>JUnit/xunit 导出</td><td><code>swift test --xunit-output</code></td><td>未产出文件（xunit 仅适用 Swift Testing）；改用控制台输出 + LCOV</td><td>间接</td><td>技术事实</td><td>以控制台计数与 <code>.profdata</code> 为准</td></tr>
             <tr><td>控制器/视图集成</td><td>默认构造 NotchPanelController 单测</td><td>故意不默认构造（会读真实数据/建真实窗口），改由门控逻辑单测 + 人工</td><td>静态/间接</td><td>避免污染真实数据的授权边界</td><td>见 2.3 未触达，登记为人工 GUI 验收</td></tr>
           </tbody>
@@ -185,7 +185,7 @@
         <table>
           <thead><tr><th>类型</th><th>需求</th><th>实际</th><th>影响</th><th>人工裁决/依据</th><th>后续动作</th><th>负责人/期限</th></tr></thead>
           <tbody>
-            <tr><td>遗漏（按计划）</td><td>AC05/AC11/AC12/AC15 完整行为 + AC03 退出路径</td><td>T1/T2 未实现，属 T3–T5 计划范围</td><td>整体功能尚不可发布</td><td>计划明示单人串行 T1→T5，本轮只做 T1/T2 验证</td><td>由 <code>/b</code> 推进 T3；验收闭合前不进入 <code>/mr</code></td><td>待认领</td></tr>
+            <tr><td>遗漏（按计划）</td><td>AC05/AC11/AC12/AC15 完整行为 + AC03 退出路径</td><td>T1/T2 未实现，属 T3–T5 计划范围</td><td>整体功能尚不可发布</td><td>计划按 T1→T5 顺序实施，本轮只做 T1/T2 验证</td><td>继续实现 T3；验收闭合前不发布</td><td>待认领</td></tr>
             <tr><td>无偏差</td><td>已实现的 T1/T2 逻辑</td><td>行为与 SPEC/technical-design 一致，无发现缺陷</td><td>无</td><td>本轮 0 FAIL、0 登记缺陷</td><td>—</td><td>—</td></tr>
           </tbody>
         </table>
@@ -204,8 +204,8 @@
         <h2>五、环境与版本</h2>
         <table>
           <tbody>
-            <tr><th>测试环境</th><td>本地 macOS 26（arm64），无远端 CI/部署；不接 Meegle</td></tr>
-            <tr><th>系统版本</th><td>仓库 NotchNotes；分支 <code>chore/init-ai-native-workflow</code>；基线 <code>main</code>=<code>9321a25</code>；工作树含 T1/T2 未提交改动（未 commit）</td></tr>
+            <tr><th>测试环境</th><td>本地 macOS 26（arm64），无远端 CI/部署</td></tr>
+            <tr><th>系统版本</th><td>仓库 NotchNotes；基线 <code>main</code>=<code>9321a25</code>；工作树含 T1/T2 改动</td></tr>
             <tr><th>测试数据</th><td>D-01 隔离 UserDefaults suite + 临时目录 + 注入 writer；D-02 离屏 NSWindow/NSHostingView；不触碰真实笔记、不启动真实应用入口</td></tr>
             <tr><th>执行工具</th><td>Swift 6.4 / XCTest / <code>llvm-cov</code>（Apple LLVM 21）；分析脚本 <code>.build/title-coverage-audit.mjs</code>（gitignored）</td></tr>
             <tr><th>执行窗口与阻塞恢复</th><td>两轮增量：第一轮 53 项 → 补 7 项特征化 → 60 项；再补 3 项 → 本轮 63 项全绿（多次运行结果一致，无 flaky 阻塞）</td></tr>
@@ -220,7 +220,7 @@
         <table>
           <thead><tr><th>事项</th><th>来源</th><th>具体动作</th><th>完成标准</th><th>负责人</th><th>状态</th></tr></thead>
           <tbody>
-            <tr><td>实现 T3 点击/菜单/失焦先存后跳</td><td>AC05 / TC-MAN-02</td><td>由 <code>/b</code> 推进，补事件门控与路由测试</td><td>AC05 有自动化 + 人工证据</td><td>待认领</td><td>未开始</td></tr>
+            <tr><td>实现 T3 点击/菜单/失焦先存后跳</td><td>AC05 / TC-MAN-02</td><td>补事件门控与路由测试</td><td>AC05 有自动化 + 人工证据</td><td>待认领</td><td>未开始</td></tr>
             <tr><td>实现 T4 输入法/键盘/VoiceOver</td><td>AC11 / AC15</td><td>marked text 门控 + 键盘等价 + 无障碍</td><td>TC-MAN-03/04 通过</td><td>待认领</td><td>未开始</td></tr>
             <tr><td>实现 T5 退出保存与删除恢复</td><td>AC03 / AC12</td><td>退出前按规则保存可取消 + 删当前编辑页语义</td><td>TC-MAN-05/06 通过，AC01–AC15 全有证据</td><td>待认领</td><td>未开始</td></tr>
             <tr><td>人工 GUI/IME/无障碍验收</td><td>TC-MAN-01~06</td><td>按 1.2 步骤在真实环境执行</td><td>逐项记录结果，不以单测替代</td><td>待认领</td><td>未开始</td></tr>
@@ -231,13 +231,13 @@
         <table>
           <thead><tr><th>问题</th><th>会造成什么具体影响</th><th>当前怎么处理</th><th>负责人</th><th>截止时间</th></tr></thead>
           <tbody>
-            <tr><td>整体功能未实现完（T3–T5）</td><td>现版本若发布，点击外部/输入法/退出不丢名等关键路径无保障</td><td>按计划串行推进，未闭合不进 <code>/mr</code></td><td>待认领</td><td>—</td></tr>
-            <tr><td>无 pytest 执行引擎 / 报告手工生成</td><td>覆盖率与报告不进 CI 自动产出，依赖本地脚本</td><td>接受（用户决定）；报告标为只读视图，不阻塞流转</td><td>待认领</td><td>—</td></tr>
+            <tr><td>整体功能未实现完（T3–T5）</td><td>现版本若发布，点击外部/输入法/退出不丢名等关键路径无保障</td><td>按计划串行推进，验收闭合前不发布</td><td>待认领</td><td>—</td></tr>
+            <tr><td>报告手工生成</td><td>覆盖率与报告不由 CI 自动产出，依赖本地命令</td><td>报告保留原始执行口径与证据</td><td>待认领</td><td>—</td></tr>
             <tr><td>控制器/输入法/无障碍行无法单测</td><td>2.1 行覆盖与 2.2 分母不含这些层</td><td>如实归入人工验收与 T3–T5，不冒充通过</td><td>待认领</td><td>—</td></tr>
           </tbody>
         </table>
         <h3>最终建议</h3>
-        <p><strong>有条件（不可整体上线）</strong>：本轮仅认证 T1/T2 的进程内逻辑——0 缺陷、增量真实行覆盖 86.63%、逻辑分支 95.2%，全绿且构建通过。AC03/AC05/AC11/AC12/AC15 依赖的 T3–T5 尚未实现、6 项人工验收未执行，整体功能发布需先完成上述任务并补真实 GUI/IME/无障碍验收。本段仅展示已有测试结论，不产生新的批准或阻塞，也不改变「未获提交/推送授权」的事实。</p>
+        <p><strong>有条件（不可整体上线）</strong>：本轮仅认证 T1/T2 的进程内逻辑——0 缺陷、增量真实行覆盖 86.63%、逻辑分支 95.2%，全绿且构建通过。AC03/AC05/AC11/AC12/AC15 依赖的 T3–T5 尚未实现、6 项人工验收未执行，整体功能发布需先完成上述任务并补真实 GUI/IME/无障碍验收。</p>
       </section>
 
     </main>

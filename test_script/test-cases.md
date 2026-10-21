@@ -2,7 +2,7 @@
 
 > 测试上下文：本地 PRD、当前功能分支及对应验收标准；本轮为「鸣人风铃久坐提醒」（`docs/prd/PRD.md` AC-B01–AC-B19 / 分支 `feat/sedentary-reminder`）｜ 负责人：个人项目｜ 更新日期：2026-10-21
 >
-> 执行引擎说明：本项目 2026-09-24 初始化时用户选择**不安装 pytest 执行引擎**（见 `AGENTS.md` 第 8 行），自动化用例沿用现有 SwiftPM XCTest，落位 `Tests/NotchNotesTests/`；本文件是每仓唯一一份测试设计活文档，只维护设计，不记录单次 PASS/FAIL，结果以测试代码与 `testing/<需求>/quality-report.html` 为准。
+> 自动化用例使用 SwiftPM XCTest，位于 `Tests/NotchNotesTests/`。本文件维护测试设计，不记录单次 PASS/FAIL；执行结果以测试代码与 `testing/<需求>/quality-report.html` 为准。
 
 ## 使用说明
 

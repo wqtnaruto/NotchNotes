@@ -7,8 +7,3 @@ dist.noindex/
 .runtime/
 .swiftpm/
 *.xcuserdatad
-
-# 本地 agent 工具缓存（skills 为软链、含个人 settings），不进任何项目仓库
-.agents/
-.claude/
-.qoder/
