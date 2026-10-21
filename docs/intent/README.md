@@ -9,3 +9,6 @@
 - `performance-hot-paths.md`：记录常驻轮询、Markdown、TextKit 与持久化热路径的性能边界。
 
 PR / MR 的 Why 段引用这里的具体决策，不从代码 diff 事后编造理由。不要将本目录搬到 `_output/`，也不要引用仅存在于个人工作区的需求级产物路径。
+
+- `notch-click-activation.md`：刘海点按、悬停与文件拖入的命中边界。
+- `sedentary-reminder-widget.md`：久坐提醒状态机、风铃窗口和系统生命周期取舍。

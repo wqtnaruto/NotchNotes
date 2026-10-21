@@ -28,6 +28,7 @@ enum TriggerMode: String, CaseIterable, Identifiable {
 
 @MainActor
 final class AppSettingsStore: ObservableObject {
+    let sedentaryReminder: SedentaryReminderStore
     @Published var triggerMode: TriggerMode {
         didSet {
             defaults.set(triggerMode.rawValue, forKey: Self.triggerModeKey)
@@ -54,6 +55,7 @@ final class AppSettingsStore: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        sedentaryReminder = SedentaryReminderStore(defaults: defaults)
         triggerMode = Self.loadTriggerMode(from: defaults)
 
         let rawLanguage = defaults.string(forKey: Self.languageKey)

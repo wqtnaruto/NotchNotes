@@ -227,11 +227,76 @@ struct NotebookView: View {
 
 private struct SettingsMenu: View {
     @ObservedObject var settingsStore: AppSettingsStore
+    @ObservedObject var reminderStore: SedentaryReminderStore
     @State private var isHovering = false
 
     var body: some View {
         Menu {
             Text(settingsStore.language.localized(.settingsTitle))
+
+            Section {
+                Toggle(isOn: Binding(
+                    get: { reminderStore.isEnabled },
+                    set: { reminderStore.setEnabled($0) }
+                )) {
+                    Label(
+                        settingsStore.language.sedentaryReminderTitle,
+                        systemImage: "figure.stand"
+                    )
+                }
+
+                if reminderStore.isEnabled {
+                    Toggle(isOn: $reminderStore.showsPendant) {
+                        Label(
+                            settingsStore.language.showPendantTitle,
+                            systemImage: reminderStore.showsPendant ? "eye.fill" : "eye.slash"
+                        )
+                    }
+
+                    Menu(settingsStore.language.reminderIntervalTitle) {
+                        ForEach(SedentaryReminderInterval.allCases) { interval in
+                            Button {
+                                reminderStore.interval = interval
+                            } label: {
+                                Label(
+                                    settingsStore.language.minutesTitle(interval.rawValue),
+                                    systemImage: reminderStore.interval == interval ? "checkmark" : ""
+                                )
+                            }
+                        }
+                    }
+
+                    Menu(settingsStore.language.activityDurationTitle) {
+                        ForEach(SedentaryActivityDuration.allCases) { duration in
+                            Button {
+                                reminderStore.activityDuration = duration
+                            } label: {
+                                Label(
+                                    settingsStore.language.minutesTitle(duration.rawValue),
+                                    systemImage: reminderStore.activityDuration == duration ? "checkmark" : ""
+                                )
+                            }
+                        }
+                    }
+
+                    Button {
+                        if reminderStore.isPaused {
+                            reminderStore.resume()
+                        } else {
+                            reminderStore.pause()
+                        }
+                    } label: {
+                        Label(
+                            reminderStore.isPaused
+                                ? settingsStore.language.resumeReminderTitle
+                                : settingsStore.language.pauseReminderTitle,
+                            systemImage: reminderStore.isPaused ? "play.fill" : "pause.fill"
+                        )
+                    }
+                }
+            } header: {
+                Text(settingsStore.language.sedentaryReminderTitle)
+            }
 
             Section {
                 ForEach(TriggerMode.allCases) { mode in
@@ -484,7 +549,18 @@ struct MarkdownShortcutToolbar: View {
             KeepAwakeButton(settingsStore: settingsStore)
                 .fixedSize()
 
-            SettingsMenu(settingsStore: settingsStore)
+            if settingsStore.sedentaryReminder.isEnabled {
+                SedentaryReminderToolbarButton(
+                    store: settingsStore.sedentaryReminder,
+                    language: settingsStore.language
+                )
+                .fixedSize()
+            }
+
+            SettingsMenu(
+                settingsStore: settingsStore,
+                reminderStore: settingsStore.sedentaryReminder
+            )
                 .fixedSize()
         }
         .frame(maxHeight: .infinity, alignment: .center)
